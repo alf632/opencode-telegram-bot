@@ -364,17 +364,23 @@ async function readSessionBusy(sessionId: string, _directory: string): Promise<b
   }
 }
 
+// `completed` decides whether a reply counts as finished, which is what lets
+// the preview show one while the session is still busy.
 function mapNormalizedMessageToPickMessage(message: {
   id: string;
   role: "user" | "assistant";
   text: string;
   created: number;
+  completed?: number;
 }): SessionPickMessage {
   return {
     info: {
       id: message.id,
       role: message.role,
-      time: { created: message.created },
+      time: {
+        created: message.created,
+        ...(message.completed === undefined ? {} : { completed: message.completed }),
+      },
     },
     parts: [{ type: "text", text: message.text }],
   };

@@ -4,6 +4,7 @@ import {
   getSessionForm,
   mapFormFieldsToQuestions,
   replyToSessionForm,
+  type SessionFormInfo,
 } from "../../../src/app/services/session-form-service.js";
 
 const mocked = vi.hoisted(() => ({
@@ -14,7 +15,7 @@ vi.mock("../../../src/opencode/client.js", () => ({
   directApi: mocked.directApiMock,
 }));
 
-function createForm(overrides: Record<string, unknown> = {}) {
+function createForm(overrides: Partial<SessionFormInfo> = {}): SessionFormInfo {
   return {
     id: "frm_1",
     sessionID: "ses-1",

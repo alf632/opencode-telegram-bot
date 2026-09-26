@@ -190,6 +190,14 @@ export interface NormalizedMessage {
   role: "user" | "assistant";
   text: string;
   created: number;
+  // v2 sends `completed` on assistant messages only; an in-flight reply has none.
+  completed?: number;
+}
+
+// One page of that history, plus the cursor for the next (older) page.
+export interface NormalizedMessagePage {
+  messages: NormalizedMessage[];
+  nextCursor?: string | undefined;
 }
 
 // Normalized wrapper over v2 session.messages. v2 messages are flat
@@ -197,11 +205,6 @@ export interface NormalizedMessage {
 /// everything else (system, compaction, shell, ...) is skipped.
 // The v2 route is cursor-paginated: {data, cursor:{previous,next}}, and
 // `order` may only be sent on the first page.
-export interface NormalizedMessagePage {
-  messages: NormalizedMessage[];
-  nextCursor?: string | undefined;
-}
-
 export async function getSessionMessagePage(
   sessionID: string,
   options?: { limit?: number; order?: "asc" | "desc"; cursor?: string },
@@ -243,7 +246,15 @@ export async function getSessionMessagePage(
         .join("")
         .trim();
       if (text.length > 0) {
-        messages.push({ id: message.id, role: "assistant", text, created: message.time.created });
+        messages.push({
+          id: message.id,
+          role: "assistant",
+          text,
+          created: message.time.created,
+          ...(message.time.completed === undefined
+            ? {}
+            : { completed: message.time.completed }),
+        });
       }
     }
   }

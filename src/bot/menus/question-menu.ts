@@ -4,6 +4,7 @@ import { getCurrentSession } from "../../app/services/session-service.js";
 import {
   getSessionForm,
   replyToSessionForm,
+  type SessionFormField,
   type SessionFormInfo,
   type SessionFormValue,
 } from "../../app/services/session-form-service.js";
@@ -219,9 +220,36 @@ async function showPollSummary(
   logger.debug("[QuestionHandler] Poll completed and cleared");
 }
 
-// v2 forms answer by field key: a selected option contributes its value
-// (all of them for a multiselect), a typed answer contributes its text.
-// Fields left unanswered are simply omitted.
+// v2 validates an answer against the field it belongs to and rejects a
+// mismatch with FormInvalidAnswerError, so a typed answer is coerced to the
+// declared type: yes/true to a boolean, a finite number to number/integer,
+// and the raw text for string/external. Selected options are already the
+// server's own values. Unanswered fields, and a number the user did not type,
+// are simply omitted.
+const BOOLEAN_TRUE_ANSWER = /^(yes|true)$/i;
+
+function coerceFormAnswer(
+  field: SessionFormField,
+  typedAnswer: string | undefined,
+  selectedValues: string[],
+): SessionFormValue | undefined {
+  if (typedAnswer !== undefined) {
+    if (field.type === "boolean") {
+      return BOOLEAN_TRUE_ANSWER.test(typedAnswer);
+    }
+    if (field.type === "number" || field.type === "integer") {
+      const parsed = Number(typedAnswer);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return typedAnswer;
+  }
+
+  if (field.type === "multiselect") {
+    return selectedValues.length > 0 ? selectedValues : undefined;
+  }
+  return selectedValues[0];
+}
+
 function buildFormAnswer(
   form: SessionFormInfo,
   deps: QuestionDataDeps,
@@ -229,25 +257,18 @@ function buildFormAnswer(
   const answer: Record<string, SessionFormValue> = {};
 
   form.fields.forEach((field, index) => {
-    const customAnswer = deps.questionManager.getCustomAnswer(index)?.trim();
-    if (customAnswer) {
-      answer[field.key] = customAnswer;
-      return;
-    }
-
     const options = field.options ?? [];
-    if (options.length === 0) {
-      return;
-    }
-
-    const values = [...deps.questionManager.getSelectedOptions(index)]
+    const selectedValues = [...deps.questionManager.getSelectedOptions(index)]
       .map((optionIndex) => options[optionIndex]?.value)
       .filter((value): value is string => value !== undefined);
-    if (values.length === 0) {
+    const typedAnswer = deps.questionManager.getCustomAnswer(index)?.trim() || undefined;
+
+    const value = coerceFormAnswer(field, typedAnswer, selectedValues);
+    if (value === undefined) {
       return;
     }
 
-    answer[field.key] = field.type === "multiselect" ? values : values[0]!;
+    answer[field.key] = value;
   });
 
   return answer;
@@ -275,7 +296,10 @@ async function sendAllAnswersToAgent(
     return;
   }
 
-  // The form is the source of truth for the answer keys and value types.
+  // The re-read form is the source of truth for the answer keys, the value
+  // types, and the form id the reply goes to. If it no longer matches the poll
+  // the answers were collected for, submitting them would be a type or key
+  // mismatch the server rejects.
   const { data: form, error: formError } = await getSessionForm(sessionID);
   if (formError || !form) {
     logger.error("[QuestionHandler] Failed to read the pending form:", formError);
@@ -283,10 +307,18 @@ async function sendAllAnswersToAgent(
     return;
   }
 
+  if (form.id !== requestID) {
+    logger.error(
+      `[QuestionHandler] Pending form changed: poll=${requestID}, form=${form.id}`,
+    );
+    await bot.sendMessage(chatId, t("question.send_answers_error"));
+    return;
+  }
+
   const answer = buildFormAnswer(form, deps);
 
   logger.info(
-    `[QuestionHandler] Sending answers to agent via form.reply: requestID=${requestID}`,
+    `[QuestionHandler] Sending answers to agent via form.reply: formID=${form.id}`,
   );
   logger.debug(`[QuestionHandler] Answers payload:`, JSON.stringify(answer, null, 2));
 
@@ -294,7 +326,7 @@ async function sendAllAnswersToAgent(
   // otherwise it may block subsequent updates
   safeBackgroundTask({
     taskName: "form.reply",
-    task: () => replyToSessionForm(sessionID, requestID, answer),
+    task: () => replyToSessionForm(sessionID, form.id, answer),
     onSuccess: ({ error }) => {
       if (error) {
         logger.error("[QuestionHandler] Failed to send answers via form.reply:", error);

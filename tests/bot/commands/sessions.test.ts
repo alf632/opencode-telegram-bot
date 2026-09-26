@@ -109,12 +109,14 @@ function createSessionMessage(
   role: "user" | "assistant",
   text: string,
   created: number,
-): { id: string; role: "user" | "assistant"; text: string; created: number } {
+  completed?: number,
+): { id: string; role: "user" | "assistant"; text: string; created: number; completed?: number } {
   return {
     id: `${role}-${created}`,
     role,
     text,
     created,
+    ...(completed === undefined ? {} : { completed }),
   };
 }
 
@@ -506,6 +508,48 @@ describe("bot/commands/sessions", () => {
     );
     expect(sent).toContain(t("sessions.preview.empty"));
     expect(sent.some((text) => text.includes("only a prompt"))).toBe(false);
+  });
+
+  it("stops after the first page for a busy session once a completed reply is found", async () => {
+    mocked.sessionGetMock.mockResolvedValueOnce({
+      data: { data: createSession(0) },
+      error: null,
+    });
+    mocked.sessionStatusMock.mockResolvedValueOnce({
+      data: { "session-1": { type: "busy" } },
+      error: null,
+    });
+    const firstPage = [
+      createSessionMessage("user", "the prompt", 2000),
+      createSessionMessage("assistant", "finished reply", 2001, 2010),
+      ...Array.from({ length: 18 }, (_, index) =>
+        createSessionMessage("assistant", "", 2100 + index),
+      ),
+    ];
+    mocked.sessionMessagePageMock.mockReset();
+    mocked.sessionMessagePageMock.mockResolvedValueOnce({
+      data: { messages: firstPage, nextCursor: "cursor-1" },
+      error: null,
+    });
+
+    startInteractionForTest(container.interactionManager, {
+      kind: "inline",
+      expectedInput: "callback",
+      metadata: {
+        menuKind: "session",
+        messageId: 456,
+      },
+    });
+
+    const ctx = createCallbackContext("session:session-1", 456);
+    await handleSessionSelect(ctx, createDeps());
+
+    // The completed reply is eligible even while busy, so paging must stop here.
+    expect(mocked.sessionMessagePageMock).toHaveBeenCalledTimes(1);
+    const sent = (ctx.api.sendMessage as ReturnType<typeof vi.fn>).mock.calls.map((call) =>
+      String(call[1]),
+    );
+    expect(sent.some((text) => text.includes("finished reply"))).toBe(true);
   });
 
   it("does not show an in-flight reply when session status cannot be read", async () => {

@@ -136,6 +136,100 @@ describe("bot/menus/question-menu", () => {
     });
   });
 
+  it("coerces a typed answer to the type the field declares", async () => {
+    mocked.getSessionFormMock.mockResolvedValue({
+      data: {
+        ...FORM,
+        fields: [
+          { key: "flag", type: "boolean", title: "Flag" },
+          { key: "count", type: "number", title: "Count" },
+          { key: "retries", type: "integer", title: "Retries" },
+          { key: "doc", type: "external", title: "Doc", url: "https://x.test" },
+        ],
+      },
+      error: null,
+    });
+    deps.questionManager.startQuestions(
+      [
+        { header: "Flag", question: "Flag", options: [] },
+        { header: "Count", question: "Count", options: [] },
+        { header: "Retries", question: "Retries", options: [] },
+        { header: "Doc", question: "Doc", options: [] },
+      ],
+      "frm_1",
+    );
+    deps.questionManager.setCustomAnswer(0, "yes");
+    deps.questionManager.setCustomAnswer(1, "42");
+    deps.questionManager.setCustomAnswer(2, "-3");
+    deps.questionManager.setCustomAnswer(3, "https://x.test/ticket");
+    const { ctx } = createContext();
+
+    for (let i = 0; i < 4; i += 1) {
+      await showNextQuestion(ctx, deps);
+    }
+
+    expect(mocked.replyToSessionFormMock).toHaveBeenCalledWith("session-1", "frm_1", {
+      flag: true,
+      count: 42,
+      retries: -3,
+      doc: "https://x.test/ticket",
+    });
+  });
+
+  it("reads a boolean answer as false for anything that is not yes or true", async () => {
+    mocked.getSessionFormMock.mockResolvedValue({
+      data: { ...FORM, fields: [{ key: "flag", type: "boolean", title: "Flag" }] },
+      error: null,
+    });
+    deps.questionManager.startQuestions(
+      [{ header: "Flag", question: "Flag", options: [] }],
+      "frm_1",
+    );
+    deps.questionManager.setCustomAnswer(0, "nope");
+    const { ctx } = createContext();
+
+    await showNextQuestion(ctx, deps);
+
+    expect(mocked.replyToSessionFormMock).toHaveBeenCalledWith("session-1", "frm_1", {
+      flag: false,
+    });
+  });
+
+  it("omits a numeric field the user answered with something that is not a number", async () => {
+    mocked.getSessionFormMock.mockResolvedValue({
+      data: { ...FORM, fields: [{ key: "count", type: "number", title: "Count" }] },
+      error: null,
+    });
+    deps.questionManager.startQuestions(
+      [{ header: "Count", question: "Count", options: [] }],
+      "frm_1",
+    );
+    deps.questionManager.setCustomAnswer(0, "three");
+    const { ctx } = createContext();
+
+    await showNextQuestion(ctx, deps);
+
+    expect(mocked.replyToSessionFormMock).toHaveBeenCalledWith("session-1", "frm_1", {});
+  });
+
+  it("does not reply when the pending form no longer matches the poll", async () => {
+    mocked.getSessionFormMock.mockResolvedValue({
+      data: { ...FORM, id: "frm_2" },
+      error: null,
+    });
+    deps.questionManager.startQuestions(
+      [{ header: "Mode", question: "How to run", options: [] }],
+      "frm_1",
+    );
+    deps.questionManager.setCustomAnswer(0, "build");
+    const { ctx, sendMessage } = createContext();
+
+    await showNextQuestion(ctx, deps);
+
+    expect(mocked.replyToSessionFormMock).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(42, t("question.send_answers_error"));
+  });
+
   it("reports a failure when the pending form cannot be read", async () => {
     mocked.getSessionFormMock.mockResolvedValue({
       data: null,

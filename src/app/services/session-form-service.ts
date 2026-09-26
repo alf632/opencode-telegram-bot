@@ -12,9 +12,20 @@ export interface SessionFormOption {
   description?: string;
 }
 
+// The six shapes 2.0.16 declares for Form.Field. A union keeps the mapping
+// total: a new server-side type becomes a compile error, not a silent
+// free-text question.
+export type SessionFormFieldType =
+  | "string"
+  | "number"
+  | "integer"
+  | "boolean"
+  | "multiselect"
+  | "external";
+
 export interface SessionFormField {
   key: string;
-  type: string;
+  type: SessionFormFieldType;
   title?: string;
   description?: string;
   options?: SessionFormOption[];

@@ -45,7 +45,7 @@ shapes back to the v1-shaped aggregator.
 | `session.diff` → bare array | `GET …/diff` → `{data: FileDiff.Info[]}` | `directApi` + nested `data` gate |
 | global `question.*` / `permission.*` | session-scoped only | `currentSession.id` |
 | `question.list` → `{questions}` | **renamed to forms**: `GET …/form` → `{data: Form.Info[]}` with `fields`, not `questions` | `getSessionForm()` |
-| `question.reply {questionV2Reply:{answers}}` | `POST …/form/{formID}/reply` with `{answer: {<fieldKey>: value}}` | `replyToSessionForm()` |
+| `question.reply {questionV2Reply:{answers}}` | `POST …/form/{formID}/reply` with `{answer: {<fieldKey>: value}}`; the value is validated per field (`FormInvalidAnswerError`), so a typed answer is coerced to the field's type — `boolean` → yes/true, `number`/`integer` → a finite number, `string`/`external` → as typed | `replyToSessionForm()` |
 | `question.reject` | `DELETE …/form/{formID}` (204) | `cancelSessionForm()` |
 | `permission.reply {reply}` | adds `once`/`always`/`reject` + optional `message` | enum |
 | `command.list` / `skill.list` → array with `source` | `{location, data}` envelope; `source` is gone | source filter dropped |
@@ -70,7 +70,9 @@ shapes back to the v1-shaped aggregator.
    speaking v1 types; translation lives in one place (`events.ts`).
 4. **Questions are forms, permissions are session-scoped** — no global routes in
    v2, and the v1 `question.*` surface was renamed to `form` (`fields`, not
-   `questions`). Only the transport changed; the poll keeps its own field model.
+   `questions`). The poll keeps its own field model and maps `Form.Info.fields`
+   onto it; because the reply route validates each value against its field, a
+   typed answer is coerced to the field's declared type before it is sent.
 5. **Prompts always go through `sendSessionPrompt()`** — v2 rejects agent/model in
    the prompt body, so switch first; body is flat (SDK `{prompt:{…}}` → 400).
 6. **Server password is mandatory** — v2 `serve` without
@@ -80,6 +82,6 @@ shapes back to the v1-shaped aggregator.
 ## Verification
 
 - `npm run build`, `npm run lint`, `npm run typecheck` — clean.
-- `npm test` — 2047 passed / 178 files / 7 skipped.
+- `npm test` — 2052 passed / 178 files / 7 skipped.
 - Live Telegram smoke: prompts stream, tool calls / file diffs render, agent /
   model / context switching fixed.

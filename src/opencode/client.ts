@@ -195,12 +195,32 @@ export interface NormalizedMessage {
 // Normalized wrapper over v2 session.messages. v2 messages are flat
 // ({type:"user",text} / {type:"assistant",content:[{type:"text",text}]});
 /// everything else (system, compaction, shell, ...) is skipped.
-export async function getSessionMessages(
+// The v2 route is cursor-paginated: {data, cursor:{previous,next}}, and
+// `order` may only be sent on the first page.
+export interface NormalizedMessagePage {
+  messages: NormalizedMessage[];
+  nextCursor?: string | undefined;
+}
+
+export async function getSessionMessagePage(
   sessionID: string,
-  limit?: number,
-): Promise<{ data: NormalizedMessage[] | null; error: Error | null }> {
-  const params: { sessionID: string; limit?: number } =
-    limit !== undefined ? { sessionID, limit } : { sessionID };
+  options?: { limit?: number; order?: "asc" | "desc"; cursor?: string },
+): Promise<{ data: NormalizedMessagePage | null; error: Error | null }> {
+  const params: {
+    sessionID: string;
+    limit?: number;
+    order?: "asc" | "desc";
+    cursor?: string;
+  } = { sessionID };
+  if (options?.limit !== undefined) {
+    params.limit = options.limit;
+  }
+  if (options?.order !== undefined) {
+    params.order = options.order;
+  }
+  if (options?.cursor !== undefined) {
+    params.cursor = options.cursor;
+  }
   const { data, error } = await opencodeV2.session.messages(params);
   if (error || !data) {
     return { data: null, error: toError(error, "No message data received") };
@@ -227,7 +247,21 @@ export async function getSessionMessages(
       }
     }
   }
-  return { data: messages, error: null };
+  return { data: { messages, nextCursor: data.cursor?.next }, error: null };
+}
+
+export async function getSessionMessages(
+  sessionID: string,
+  limit?: number,
+): Promise<{ data: NormalizedMessage[] | null; error: Error | null }> {
+  const { data, error } = await getSessionMessagePage(
+    sessionID,
+    limit !== undefined ? { limit } : undefined,
+  );
+  if (error || !data) {
+    return { data: null, error };
+  }
+  return { data: data.messages, error: null };
 }
 
 // Normalized wrapper over v2 session.list (envelope {location, data:{data, cursor}},

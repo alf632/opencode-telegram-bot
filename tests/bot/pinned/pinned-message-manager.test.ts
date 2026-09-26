@@ -8,7 +8,7 @@ const mocked = vi.hoisted(() => ({
       get: vi.fn().mockResolvedValue({ data: null }),
     },
   },
-  directApi: vi.fn().mockResolvedValue({ data: [] }),
+  directApi: vi.fn().mockResolvedValue({ data: { data: [] } }),
   getCurrentSession: vi.fn(),
   getCurrentProject: vi.fn(),
   getPinnedMessageId: vi.fn().mockReturnValue(null),
@@ -110,7 +110,7 @@ describe("pinned/manager", () => {
     mocked.getPinnedMessageId.mockReturnValue(null);
     mocked.getPinnedDashboardEnabled.mockReturnValue(true);
     mocked.opencodeV2.session.messages.mockResolvedValue({ data: { data: [] } });
-    mocked.directApi.mockResolvedValue({ data: [] });
+    mocked.directApi.mockResolvedValue({ data: { data: [] } });
     mocked.opencodeV2.session.get.mockResolvedValue({ data: null });
     mocked.getGitWorktreeContext.mockResolvedValue({
       mainProjectPath: "D:/repo",
@@ -502,12 +502,15 @@ describe("pinned/manager", () => {
 
   describe("loading file diffs on session change", () => {
     it("uses session diff results and ignores entries without a file", async () => {
+      // v2 wraps the diff in a {data: FileDiff.Info[]} envelope.
       mocked.directApi.mockResolvedValue({
-        data: [
-          { file: "D:/repo/src/a.ts", additions: 3, deletions: 1 },
-          { additions: 9, deletions: 9 },
-          { file: "D:/repo/src/b.ts", additions: 0, deletions: 2 },
-        ],
+        data: {
+          data: [
+            { file: "D:/repo/src/a.ts", additions: 3, deletions: 1 },
+            { additions: 9, deletions: 9 },
+            { file: "D:/repo/src/b.ts", additions: 0, deletions: 2 },
+          ],
+        },
         error: null,
       });
 
@@ -672,7 +675,7 @@ describe("pinned/manager", () => {
 
     it("restores the file diffs of the session it reattaches to", async () => {
       mocked.directApi.mockResolvedValue({
-        data: [{ file: "D:/repo/src/a.ts", additions: 4, deletions: 0 }],
+        data: { data: [{ file: "D:/repo/src/a.ts", additions: 4, deletions: 0 }] },
       });
 
       await pinnedMessageManager.restoreExistingSession("ses-1", "Restored session");

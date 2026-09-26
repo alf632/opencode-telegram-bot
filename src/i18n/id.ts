@@ -403,7 +403,6 @@ export const id: I18nDictionary = {
   "question.cancelled": "❌ Pertanyaan dibatalkan",
   "question.answer_already_received": "Jawaban sudah diterima, tunggu sebentar...",
   "question.completed_no_answers": "✅ Pertanyaan selesai (tanpa jawaban)",
-  "question.no_active_project": "❌ Tidak ada proyek aktif",
   "question.no_active_request": "❌ Tidak ada pertanyaan aktif",
   "question.send_answers_error": "❌ Gagal mengirim jawaban ke agent",
   "question.multi_hint": "\n(Bisa pilih beberapa opsi)",

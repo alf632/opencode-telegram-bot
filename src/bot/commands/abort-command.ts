@@ -115,7 +115,8 @@ export async function abortCurrentOperation(
     markUserAbortRequested(currentSession.id);
 
     try {
-      // v2 interrupt answers 204 with no payload; confirmation happens via the status poll below.
+      // v2 interrupt answers 200 with {interrupted}; confirmation still happens
+      // via the status poll below.
       const { error: abortError } = await opencodeV2.session.interrupt({
         sessionID: currentSession.id,
       });

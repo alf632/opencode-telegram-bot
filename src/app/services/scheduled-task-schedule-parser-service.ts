@@ -210,7 +210,19 @@ export async function parseTaskSchedule(
       throw promptError || new Error("Failed to parse schedule");
     }
 
-    await opencodeV2.session.wait({ sessionID: session.id });
+    // 2.0.16 only exposes wait under /api/experimental. A failure here is not
+    // fatal: the messages read below still carry whatever the agent produced.
+    const { error: waitError } = await directApi(
+      "POST",
+      `/api/experimental/session/${session.id}/wait`,
+    );
+    if (waitError) {
+      logger.warn(
+        `[ScheduledTaskScheduleParser] Failed to wait for the schedule parser session: sessionId=${session.id}`,
+        waitError,
+      );
+    }
+
     const { data: answerMessages, error: messagesError } = await getSessionMessages(session.id);
 
     if (messagesError || !answerMessages) {

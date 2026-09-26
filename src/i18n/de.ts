@@ -423,7 +423,6 @@ export const de: I18nDictionary = {
   "question.cancelled": "❌ Umfrage abgebrochen",
   "question.answer_already_received": "Antwort bereits erhalten, bitte warten...",
   "question.completed_no_answers": "✅ Umfrage abgeschlossen (keine Antworten)",
-  "question.no_active_project": "❌ Kein aktives Projekt",
   "question.no_active_request": "❌ Keine aktive Anfrage",
   "question.send_answers_error": "❌ Antworten konnten nicht an den Agenten gesendet werden",
   "question.multi_hint": "\n(Du kannst mehrere Optionen auswählen)",

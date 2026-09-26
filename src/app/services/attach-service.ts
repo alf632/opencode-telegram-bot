@@ -6,6 +6,7 @@ import type { PermissionRequest } from "../types/permission.js";
 import type { SessionInfo } from "../types/session.js";
 import { getCurrentSession } from "./session-service.js";
 import { getCurrentProject } from "../stores/settings-store.js";
+import { getSessionForm, mapFormFieldsToQuestions } from "./session-form-service.js";
 import { resolveSessionParentChain } from "./recent-sessions-service.js";
 import { resetStreamThrottle } from "../../bot/streaming/stream-throttle.js";
 import { logger } from "../../utils/logger.js";
@@ -89,25 +90,22 @@ async function restorePendingQuestion(
   sessionId: string,
   _directory: string,
 ): Promise<boolean> {
-  const { data, error } = await opencodeV2.session.question.list({
-    sessionID: sessionId,
-  });
+  const { data: pendingForm, error } = await getSessionForm(sessionId);
 
-  if (error || !data) {
+  if (error || !pendingForm) {
     if (isExpectedOpencodeUnavailableError(error)) {
-      logger.warn("[Attach] OpenCode server unavailable; skipping pending question restore");
+      logger.warn("[Attach] OpenCode server unavailable; skipping pending form restore");
     } else {
-      logger.warn("[Attach] Failed to load pending questions during attach:", error);
+      logger.warn("[Attach] Failed to load pending forms during attach:", error);
     }
     return false;
   }
 
-  const pendingQuestion = data.data[0];
-  if (!pendingQuestion || !attachPresentation) {
+  if (!attachPresentation) {
     return false;
   }
 
-  deps.questionManager.startQuestions(pendingQuestion.questions, pendingQuestion.id);
+  deps.questionManager.startQuestions(mapFormFieldsToQuestions(pendingForm), pendingForm.id);
   await attachPresentation.showCurrentQuestion(bot.api, chatId);
   return true;
 }

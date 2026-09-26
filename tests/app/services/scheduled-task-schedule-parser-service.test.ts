@@ -3,7 +3,6 @@ import { parseTaskSchedule } from "../../../src/app/services/scheduled-task-sche
 
 const mocked = vi.hoisted(() => ({
   sessionCreateMock: vi.fn(),
-  sessionWaitMock: vi.fn(),
   sessionPromptMock: vi.fn(),
   sessionMessagesMock: vi.fn(),
   directApiMock: vi.fn(),
@@ -17,7 +16,6 @@ vi.mock("../../../src/opencode/client.js", () => ({
   opencodeV2: {
     session: {
       create: mocked.sessionCreateMock,
-      wait: mocked.sessionWaitMock,
     },
   },
   sendSessionPrompt: mocked.sessionPromptMock,
@@ -46,7 +44,6 @@ function parserResponse(text: string) {
 describe("app/services/scheduled-task-schedule-parser-service", () => {
   beforeEach(() => {
     mocked.sessionCreateMock.mockReset();
-    mocked.sessionWaitMock.mockReset();
     mocked.sessionPromptMock.mockReset();
     mocked.sessionMessagesMock.mockReset();
     mocked.directApiMock.mockReset();
@@ -59,7 +56,6 @@ describe("app/services/scheduled-task-schedule-parser-service", () => {
       data: { data: { id: "temp-session" } },
       error: null,
     });
-    mocked.sessionWaitMock.mockResolvedValue({ data: undefined, error: null });
     mocked.sessionPromptMock.mockResolvedValue({ data: undefined, error: null });
     mocked.directApiMock.mockResolvedValue({ data: null, error: null });
     mocked.cleanupIgnoresMock.mockResolvedValue(0);
@@ -93,7 +89,39 @@ describe("app/services/scheduled-task-schedule-parser-service", () => {
     });
     expect(mocked.cleanupIgnoresMock).toHaveBeenCalledTimes(1);
     expect(mocked.registerIgnoreMock).toHaveBeenCalledWith("temp-session");
+    expect(mocked.directApiMock).toHaveBeenCalledWith(
+      "POST",
+      "/api/experimental/session/temp-session/wait",
+    );
     expect(mocked.directApiMock).toHaveBeenCalledWith("DELETE", "/api/session/temp-session");
+  });
+
+  it("still reads the parser response when the experimental wait route fails", async () => {
+    mocked.sessionMessagesMock.mockResolvedValue(
+      parserResponse(
+        JSON.stringify({
+          kind: "cron",
+          cron: "*/5 * * * *",
+          timezone: "UTC",
+          summary: "Every 5 minutes",
+          nextRunAt: "2026-03-15T10:05:00.000Z",
+        }),
+      ),
+    );
+    mocked.directApiMock.mockImplementation((method: string, path: string) => {
+      if (method === "POST" && path.endsWith("/wait")) {
+        return Promise.resolve({ data: null, error: new Error("HTTP 404 for POST") });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+
+    const result = await parseTaskSchedule("every 5 minutes", "D:/Projects/Repo");
+
+    expect(result.kind).toBe("cron");
+    expect(mocked.loggerWarnMock).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to wait for the schedule parser session"),
+      expect.any(Error),
+    );
   });
 
   it("parses one-time schedule from fenced JSON", async () => {

@@ -421,7 +421,6 @@ export const pt: I18nDictionary = {
   "question.cancelled": "❌ Enquete cancelada",
   "question.answer_already_received": "Resposta já recebida, aguarde...",
   "question.completed_no_answers": "✅ Enquete concluída (sem respostas)",
-  "question.no_active_project": "❌ Nenhum projeto ativo",
   "question.no_active_request": "❌ Nenhuma solicitação ativa",
   "question.send_answers_error": "❌ Não foi possível enviar as respostas ao agente",
   "question.multi_hint": "\n(Você pode selecionar várias opções)",

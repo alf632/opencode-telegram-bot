@@ -8,13 +8,19 @@ const mocked = vi.hoisted(() => ({
   statusMock: vi.fn(),
   interruptMock: vi.fn(),
   directApiMock: vi.fn(),
-  questionListMock: vi.fn(),
-  questionRejectMock: vi.fn(),
+  getSessionFormMock: vi.fn(),
+  cancelSessionFormMock: vi.fn(),
   permissionListMock: vi.fn(),
   permissionReplyMock: vi.fn(),
   cleanupIgnoresMock: vi.fn(),
   registerIgnoreMock: vi.fn(),
   loggerWarnMock: vi.fn(),
+}));
+
+vi.mock("../../../src/app/services/session-form-service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/app/services/session-form-service.js")>()),
+  getSessionForm: mocked.getSessionFormMock,
+  cancelSessionForm: mocked.cancelSessionFormMock,
 }));
 
 vi.mock("../../../src/opencode/client.js", () => ({
@@ -23,10 +29,6 @@ vi.mock("../../../src/opencode/client.js", () => ({
       create: mocked.createMock,
       messages: mocked.messagesMock,
       interrupt: mocked.interruptMock,
-      question: {
-        list: mocked.questionListMock,
-        reject: mocked.questionRejectMock,
-      },
       permission: {
         list: mocked.permissionListMock,
         reply: mocked.permissionReplyMock,
@@ -121,15 +123,15 @@ describe("app/services/scheduled-task-executor-service", () => {
     mocked.statusMock.mockReset();
     mocked.interruptMock.mockReset();
     mocked.directApiMock.mockReset();
-    mocked.questionListMock.mockReset();
-    mocked.questionRejectMock.mockReset();
+    mocked.getSessionFormMock.mockReset();
+    mocked.cancelSessionFormMock.mockReset();
     mocked.permissionListMock.mockReset();
     mocked.permissionReplyMock.mockReset();
     mocked.cleanupIgnoresMock.mockReset();
     mocked.registerIgnoreMock.mockReset();
     mocked.loggerWarnMock.mockReset();
-    mocked.questionListMock.mockResolvedValue({ data: { data: [] }, error: null });
-    mocked.questionRejectMock.mockResolvedValue({ data: true, error: null });
+    mocked.getSessionFormMock.mockResolvedValue({ data: null, error: null });
+    mocked.cancelSessionFormMock.mockResolvedValue({ error: null });
     mocked.permissionListMock.mockResolvedValue({ data: { data: [] }, error: null });
     mocked.permissionReplyMock.mockResolvedValue({ data: true, error: null });
     mocked.interruptMock.mockResolvedValue({ data: true, error: null });
@@ -556,7 +558,7 @@ describe("app/services/scheduled-task-executor-service", () => {
     expect(mocked.directApiMock).toHaveBeenCalledWith("DELETE", "/api/session/session-1");
   });
 
-  it("fails, rejects, aborts, and cleans up when scheduled task asks a question", async () => {
+  it("fails, cancels, aborts, and cleans up when scheduled task is asked a form", async () => {
     const { executeScheduledTask } = await import(
       "../../../src/app/services/scheduled-task-executor-service.js"
     );
@@ -566,15 +568,12 @@ describe("app/services/scheduled-task-executor-service", () => {
       error: null,
     });
     mocked.sendSessionPromptMock.mockResolvedValueOnce({ data: undefined, error: null });
-    mocked.questionListMock.mockResolvedValueOnce({
+    mocked.getSessionFormMock.mockResolvedValueOnce({
       data: {
-        data: [
-          {
-            id: "question-1",
-            sessionID: "session-1",
-            questions: [{ header: "Choice", question: "Continue?", options: [] }],
-          },
-        ],
+        id: "frm_1",
+        sessionID: "session-1",
+        title: "Choice",
+        fields: [{ key: "choice", type: "string", title: "Choice" }],
       },
       error: null,
     });
@@ -584,10 +583,8 @@ describe("app/services/scheduled-task-executor-service", () => {
       resultText: null,
       errorMessage: "Scheduled task requested an interactive question and cannot continue unattended.",
     });
-    expect(mocked.questionRejectMock).toHaveBeenCalledWith({
-      sessionID: "session-1",
-      requestID: "question-1",
-    });
+    expect(mocked.getSessionFormMock).toHaveBeenCalledWith("session-1");
+    expect(mocked.cancelSessionFormMock).toHaveBeenCalledWith("session-1", "frm_1");
     expect(mocked.interruptMock).toHaveBeenCalledWith({
       sessionID: "session-1",
     });
@@ -649,18 +646,6 @@ describe("app/services/scheduled-task-executor-service", () => {
       error: null,
     });
     mocked.sendSessionPromptMock.mockResolvedValueOnce({ data: undefined, error: null });
-    mocked.questionListMock.mockResolvedValueOnce({
-      data: {
-        data: [
-          {
-            id: "question-1",
-            sessionID: "other-session",
-            questions: [{ header: "Choice", question: "Continue?", options: [] }],
-          },
-        ],
-      },
-      error: null,
-    });
     mocked.permissionListMock.mockResolvedValueOnce({
       data: {
         data: [
@@ -686,7 +671,7 @@ describe("app/services/scheduled-task-executor-service", () => {
       resultText: "Done",
       errorMessage: null,
     });
-    expect(mocked.questionRejectMock).not.toHaveBeenCalled();
+    expect(mocked.cancelSessionFormMock).not.toHaveBeenCalled();
     expect(mocked.permissionReplyMock).not.toHaveBeenCalled();
     expect(mocked.interruptMock).not.toHaveBeenCalled();
     expect(mocked.directApiMock).toHaveBeenCalledWith("DELETE", "/api/session/session-1");

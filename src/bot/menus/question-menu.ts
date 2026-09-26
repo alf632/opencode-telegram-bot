@@ -1,8 +1,12 @@
 import { Context, InlineKeyboard } from "grammy";
 import type { AppContainer } from "../../app/bootstrap/app-container.js";
-import { opencodeV2 } from "../../opencode/client.js";
-import { getCurrentProject } from "../../app/stores/settings-store.js";
 import { getCurrentSession } from "../../app/services/session-service.js";
+import {
+  getSessionForm,
+  replyToSessionForm,
+  type SessionFormInfo,
+  type SessionFormValue,
+} from "../../app/services/session-form-service.js";
 import { logger } from "../../utils/logger.js";
 import { safeBackgroundTask } from "../../utils/safe-background-task.js";
 import { t } from "../../i18n/index.js";
@@ -215,24 +219,49 @@ async function showPollSummary(
   logger.debug("[QuestionHandler] Poll completed and cleared");
 }
 
+// v2 forms answer by field key: a selected option contributes its value
+// (all of them for a multiselect), a typed answer contributes its text.
+// Fields left unanswered are simply omitted.
+function buildFormAnswer(
+  form: SessionFormInfo,
+  deps: QuestionDataDeps,
+): Record<string, SessionFormValue> {
+  const answer: Record<string, SessionFormValue> = {};
+
+  form.fields.forEach((field, index) => {
+    const customAnswer = deps.questionManager.getCustomAnswer(index)?.trim();
+    if (customAnswer) {
+      answer[field.key] = customAnswer;
+      return;
+    }
+
+    const options = field.options ?? [];
+    if (options.length === 0) {
+      return;
+    }
+
+    const values = [...deps.questionManager.getSelectedOptions(index)]
+      .map((optionIndex) => options[optionIndex]?.value)
+      .filter((value): value is string => value !== undefined);
+    if (values.length === 0) {
+      return;
+    }
+
+    answer[field.key] = field.type === "multiselect" ? values : values[0]!;
+  });
+
+  return answer;
+}
+
 async function sendAllAnswersToAgent(
   bot: Context["api"],
   chatId: number,
   deps: QuestionDataDeps,
 ): Promise<void> {
   const { questionManager } = deps;
-  const currentProject = getCurrentProject();
   const currentSession = getCurrentSession();
   const requestID = questionManager.getRequestID();
-  const totalQuestions = questionManager.getTotalQuestions();
-  const directory = currentSession?.directory ?? currentProject?.worktree;
   const sessionID = currentSession?.id;
-
-  if (!directory) {
-    logger.error("[QuestionHandler] No project for sending answers");
-    await bot.sendMessage(chatId, t("question.no_active_project"));
-    return;
-  }
 
   if (!sessionID) {
     logger.error("[QuestionHandler] No session for sending answers");
@@ -246,51 +275,34 @@ async function sendAllAnswersToAgent(
     return;
   }
 
-  // Collect answers for all questions
-  // Format: Array<Array<string>> - for each question, an array of strings (selected options)
-  const allAnswers: string[][] = [];
-
-  for (let i = 0; i < totalQuestions; i++) {
-    const customAnswer = questionManager.getCustomAnswer(i);
-    const selectedAnswer = questionManager.getSelectedAnswer(i);
-
-    // Priority: custom answer > selected options
-    const answer = customAnswer || selectedAnswer || "";
-
-    if (answer) {
-      // Split by newlines if multiple options were selected (in multiple choice mode)
-      // Each option is formatted as "* Label: Description"
-      const answerParts = answer.split("\n").filter((part) => part.trim());
-      allAnswers.push(answerParts);
-    } else {
-      // Empty answer for unanswered questions
-      allAnswers.push([]);
-    }
+  // The form is the source of truth for the answer keys and value types.
+  const { data: form, error: formError } = await getSessionForm(sessionID);
+  if (formError || !form) {
+    logger.error("[QuestionHandler] Failed to read the pending form:", formError);
+    await bot.sendMessage(chatId, t("question.send_answers_error"));
+    return;
   }
 
-  logger.info(
-    `[QuestionHandler] Sending all ${totalQuestions} answers to agent via question.reply: requestID=${requestID}`,
-  );
-  logger.debug(`[QuestionHandler] Answers payload:`, JSON.stringify(allAnswers, null, 2));
+  const answer = buildFormAnswer(form, deps);
 
-  // CRITICAL: Fire-and-forget! Do not wait for question.reply to complete,
+  logger.info(
+    `[QuestionHandler] Sending answers to agent via form.reply: requestID=${requestID}`,
+  );
+  logger.debug(`[QuestionHandler] Answers payload:`, JSON.stringify(answer, null, 2));
+
+  // CRITICAL: Fire-and-forget! Do not wait for form.reply to complete,
   // otherwise it may block subsequent updates
   safeBackgroundTask({
-    taskName: "question.reply",
-    task: () =>
-      opencodeV2.session.question.reply({
-        sessionID,
-        requestID,
-        questionV2Reply: { answers: allAnswers },
-      }),
+    taskName: "form.reply",
+    task: () => replyToSessionForm(sessionID, requestID, answer),
     onSuccess: ({ error }) => {
       if (error) {
-        logger.error("[QuestionHandler] Failed to send answers via question.reply:", error);
+        logger.error("[QuestionHandler] Failed to send answers via form.reply:", error);
         void bot.sendMessage(chatId, t("question.send_answers_error")).catch(() => {});
         return;
       }
 
-      logger.info("[QuestionHandler] All answers sent to agent successfully via question.reply");
+      logger.info("[QuestionHandler] All answers sent to agent successfully via form.reply");
     },
   });
 }

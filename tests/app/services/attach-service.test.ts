@@ -23,7 +23,7 @@ const mocked = vi.hoisted(() => ({
   healthMock: vi.fn(),
   sessionStatusMock: vi.fn(),
   sessionGetMock: vi.fn(),
-  questionListMock: vi.fn(),
+  getSessionFormMock: vi.fn(),
   permissionListMock: vi.fn(),
   setSessionSummaryMock: vi.fn(),
   setBotAndChatIdMock: vi.fn(),
@@ -52,15 +52,17 @@ vi.mock("../../../src/app/services/session-service.js", () => ({
   getCurrentSession: vi.fn(() => mocked.currentSession),
 }));
 
+vi.mock("../../../src/app/services/session-form-service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/app/services/session-form-service.js")>()),
+  getSessionForm: mocked.getSessionFormMock,
+}));
+
 vi.mock("../../../src/opencode/client.js", () => ({
   getServerInfo: mocked.healthMock,
   getBusySessionStatuses: mocked.sessionStatusMock,
   opencodeV2: {
     session: {
       get: mocked.sessionGetMock,
-      question: {
-        list: mocked.questionListMock,
-      },
       permission: {
         list: mocked.permissionListMock,
       },
@@ -155,8 +157,8 @@ describe("attach/service", () => {
     });
     mocked.sessionGetMock.mockReset();
     mocked.registerRestoredPermissionChildMock.mockReset();
-    mocked.questionListMock.mockReset();
-    mocked.questionListMock.mockResolvedValue({ data: { data: [] }, error: null });
+    mocked.getSessionFormMock.mockReset();
+    mocked.getSessionFormMock.mockResolvedValue({ data: null, error: null });
     mocked.permissionListMock.mockReset();
     mocked.permissionListMock.mockResolvedValue({ data: { data: [] }, error: null });
     mocked.setSessionSummaryMock.mockReset();
@@ -239,20 +241,19 @@ describe("attach/service", () => {
     expect(mocked.ensureEventSubscriptionMock).toHaveBeenCalledTimes(1);
   });
 
-  it("restores a pending question when first following a session", async () => {
-    mocked.questionListMock.mockResolvedValueOnce({
+  it("restores a pending form when first following a session", async () => {
+    mocked.getSessionFormMock.mockResolvedValueOnce({
       data: {
-        data: [
+        id: "frm_1",
+        sessionID: "session-1",
+        title: "Pick one",
+        fields: [
           {
-            id: "question-1",
-            sessionID: "session-1",
-            questions: [
-              {
-                header: "Q1",
-                question: "Continue?",
-                options: [{ label: "Yes", description: "continue" }],
-              },
-            ],
+            key: "mode",
+            type: "string",
+            title: "Mode",
+            description: "Continue?",
+            options: [{ value: "build", label: "Yes", description: "continue" }],
           },
         ],
       },
@@ -269,6 +270,12 @@ describe("attach/service", () => {
 
     expect(result.restoredQuestion).toBe(true);
     expect(mocked.showCurrentQuestionMock).toHaveBeenCalledOnce();
+    expect(container.questionManager.getRequestID()).toBe("frm_1");
+    expect(container.questionManager.getCurrentQuestion()).toEqual({
+      header: "Mode",
+      question: "Continue?",
+      options: [{ label: "Yes", description: "continue" }],
+    });
   });
 
   it("restores a detached child permission and attributes it to the followed root", async () => {
@@ -287,8 +294,11 @@ describe("attach/service", () => {
     expect(mocked.showPermissionRequestMock).toHaveBeenCalledWith(expect.anything(), 777, request, expect.anything());
   });
 
-  it("queues a child permission behind a restored question", async () => {
-    mocked.questionListMock.mockResolvedValue({ data: { data: [{ id: "question-1", sessionID: "session-1", questions: [] }] }, error: null });
+  it("queues a child permission behind a restored form", async () => {
+    mocked.getSessionFormMock.mockResolvedValue({
+      data: { id: "frm_1", sessionID: "session-1", title: "Pick", fields: [] },
+      error: null,
+    });
     mocked.permissionListMock.mockResolvedValue({ data: { data: [{ id: "permission-child", sessionID: "child", action: "edit", resources: ["*"], metadata: {}, save: [] }] }, error: null });
     mocked.sessionGetMock.mockResolvedValue({ data: { data: { parentID: "session-1" } }, error: null });
 
@@ -371,7 +381,7 @@ describe("attach/service", () => {
     expect(restored).toBe(false);
     expect(mocked.pinnedLoadContextFromHistoryMock).not.toHaveBeenCalled();
     expect(mocked.sessionStatusMock).not.toHaveBeenCalled();
-    expect(mocked.questionListMock).not.toHaveBeenCalled();
+    expect(mocked.getSessionFormMock).not.toHaveBeenCalled();
     expect(mocked.permissionListMock).not.toHaveBeenCalled();
     expect(mocked.ensureEventSubscriptionMock).not.toHaveBeenCalled();
   });
@@ -400,7 +410,7 @@ describe("attach/service", () => {
     expect(mocked.ensureEventSubscriptionMock).toHaveBeenCalledTimes(1);
     expect(mocked.pinnedLoadContextFromHistoryMock).toHaveBeenCalledTimes(1);
     expect(mocked.sessionStatusMock).toHaveBeenCalledTimes(2);
-    expect(mocked.questionListMock).toHaveBeenCalledTimes(2);
+    expect(mocked.getSessionFormMock).toHaveBeenCalledTimes(2);
   });
 
   it("detaches locally without stopping the directory event listener", async () => {

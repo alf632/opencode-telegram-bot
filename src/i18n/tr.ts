@@ -404,7 +404,6 @@ export const tr: I18nDictionary = {
   "question.cancelled": "❌ Anket iptal edildi",
   "question.answer_already_received": "Yanıt zaten alındı, lütfen bekleyin...",
   "question.completed_no_answers": "✅ Anket tamamlandı (yanıt yok)",
-  "question.no_active_project": "❌ Etkin proje yok",
   "question.no_active_request": "❌ Etkin istek yok",
   "question.send_answers_error": "❌ Yanıtlar ajana gönderilemedi",
   "question.multi_hint": "\n(Birden fazla seçenek seçebilirsiniz)",

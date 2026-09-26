@@ -423,17 +423,17 @@ export class PinnedMessageManager {
       logger.debug(`[PinnedManager] loadDiffsFromApi: trying session diff for ${sessionId}`);
 
       // Try session diff API first (v2: GET /api/session/{id}/diff)
-      const { data, error } = await directApi<Array<{ file?: string; additions?: number; deletions?: number }>>(
-        "GET",
-        `/api/session/${sessionId}/diff`,
-      );
+      // The body is an envelope: {data: FileDiff.Info[]}.
+      const { data, error } = await directApi<{
+        data: Array<{ file?: string; additions?: number; deletions?: number }>;
+      }>("GET", `/api/session/${sessionId}/diff`);
 
       logger.debug(
-        `[PinnedManager] session diff result: error=${!!error}, data.length=${data?.length ?? 0}`,
+        `[PinnedManager] session diff result: error=${!!error}, data.length=${data?.data?.length ?? 0}`,
       );
 
-      if (!error && data && data.length > 0) {
-        this.state.changedFiles = data
+      if (!error && data?.data && data.data.length > 0) {
+        this.state.changedFiles = data.data
           .filter((d): d is typeof d & { file: string } => !!d.file)
           .map((d) => ({
             file: d.file,

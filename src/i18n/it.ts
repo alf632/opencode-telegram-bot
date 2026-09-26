@@ -419,7 +419,6 @@ export const it: I18nDictionary = {
   "question.cancelled": "❌ Sondaggio annullato",
   "question.answer_already_received": "Risposta già ricevuta, attendi...",
   "question.completed_no_answers": "✅ Sondaggio completato (nessuna risposta)",
-  "question.no_active_project": "❌ Nessun progetto attivo",
   "question.no_active_request": "❌ Nessuna richiesta attiva",
   "question.send_answers_error": "❌ Invio delle risposte all'agente non riuscito",
   "question.multi_hint": "\n(Puoi selezionare più opzioni)",

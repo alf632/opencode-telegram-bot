@@ -1,6 +1,11 @@
 import type { Bot, Context } from "grammy";
 import type { AppContainer } from "../../app/bootstrap/app-container.js";
-import { getBusySessionStatuses, getSessionMessages, opencodeV2 } from "../../opencode/client.js";
+import {
+  getBusySessionStatuses,
+  getSessionMessagePage,
+  getSessionMessages,
+  opencodeV2,
+} from "../../opencode/client.js";
 import { resolveProjectAgent } from "../../app/services/agent-selection-service.js";
 import { getStoredModel } from "../../app/services/model-selection-service.js";
 import { setCurrentSession } from "../../app/services/session-service.js";
@@ -57,6 +62,7 @@ interface SelectSessionByIdOptions {
 }
 
 const LATEST_ASSISTANT_RESPONSE_MESSAGES_LIMIT = 20;
+const SESSION_PICK_PAGE_SIZE = 20;
 const SESSION_PICK_SEND_GAP_MS = 1000;
 
 async function removeCallbackReplyMarkup(ctx: Context): Promise<void> {
@@ -374,19 +380,72 @@ function mapNormalizedMessageToPickMessage(message: {
   };
 }
 
+// v2 messages carry no parent link, so pair every reply with the nearest user
+// message that came before it. That is what makes the preview quote the prompt
+// the shown reply answers.
+function linkParentPrompts(messages: SessionPickMessage[]): void {
+  const chronological = [...messages].sort(
+    (left, right) => (left.info.time?.created ?? 0) - (right.info.time?.created ?? 0),
+  );
+  let lastUserId: string | undefined;
+  for (const message of chronological) {
+    if (message.info.role === "user") {
+      lastUserId = message.info.id;
+      continue;
+    }
+    if (lastUserId !== undefined) {
+      message.info.parentID = lastUserId;
+    }
+  }
+}
+
 async function loadSessionPickMessages(
   sessionId: string,
   _directory: string,
-  _busy: boolean,
+  busy: boolean,
 ): Promise<SessionPickMessage[] | null> {
-  try {
-    const { data: messages, error } = await getSessionMessages(sessionId, 100);
-    if (error || !messages) {
-      logger.warn("[Sessions] Failed to fetch session messages for pick:", error);
-      return null;
-    }
+  const loaded: SessionPickMessage[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
 
-    return messages.map(mapNormalizedMessageToPickMessage);
+  try {
+    for (;;) {
+      const { data: page, error } = await getSessionMessagePage(sessionId, {
+        limit: SESSION_PICK_PAGE_SIZE,
+        ...(cursor ? { cursor } : { order: "desc" }),
+      });
+
+      if (error || !page) {
+        logger.warn("[Sessions] Failed to fetch session messages for pick:", error);
+        return null;
+      }
+
+      if (page.messages.length === 0) {
+        return loaded;
+      }
+
+      let added = 0;
+      for (const message of page.messages) {
+        if (seen.has(message.id)) {
+          continue;
+        }
+        seen.add(message.id);
+        loaded.push(mapNormalizedMessageToPickMessage(message));
+        added += 1;
+      }
+      linkParentPrompts(loaded);
+
+      if (added === 0 || findEligibleReply(loaded, busy)) {
+        return loaded;
+      }
+      if (page.messages.length < SESSION_PICK_PAGE_SIZE) {
+        return loaded;
+      }
+      if (!page.nextCursor || page.nextCursor === cursor) {
+        return loaded;
+      }
+      cursor = page.nextCursor;
+    }
   } catch (err) {
     logger.error("[Sessions] Error loading session messages for pick:", err);
     return null;

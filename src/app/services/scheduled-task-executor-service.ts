@@ -8,6 +8,7 @@ import {
 } from "../../opencode/client.js";
 import { logger } from "../../utils/logger.js";
 import { extractErrorMessage } from "../../utils/opencode-error.js";
+import { cancelSessionForm, getSessionForm } from "./session-form-service.js";
 import {
   cleanupScheduledTaskSessionIgnores,
   registerScheduledTaskSessionIgnore,
@@ -28,10 +29,10 @@ const INTERACTIVE_PERMISSION_REJECT_MESSAGE =
 
 type InteractiveRequestKind = "question" | "permission";
 
-type PendingQuestionRequest = {
+type PendingFormRequest = {
   id: string;
   sessionID: string;
-  questions?: unknown[];
+  fields?: unknown[];
 };
 
 type PendingPermissionRequest = {
@@ -42,7 +43,7 @@ type PendingPermissionRequest = {
 };
 
 type PendingInteractiveRequest =
-  | { kind: "question"; request: PendingQuestionRequest }
+  | { kind: "question"; request: PendingFormRequest }
   | { kind: "permission"; request: PendingPermissionRequest };
 
 type MessagePartSnapshot = {
@@ -298,21 +299,20 @@ async function loadPendingInteractiveRequest(
   sessionId: string,
   _directory: string,
 ): Promise<PendingInteractiveRequest | null> {
-  const [questionsResult, permissionsResult] = await Promise.all([
-    opencodeV2.session.question.list({ sessionID: sessionId }),
+  const [formsResult, permissionsResult] = await Promise.all([
+    getSessionForm(sessionId),
     opencodeV2.session.permission.list({ sessionID: sessionId }),
   ]);
 
-  if (questionsResult.error) {
+  if (formsResult.error) {
     logger.warn(
-      `[ScheduledTaskExecutor] Failed to list pending questions: sessionId=${sessionId}`,
-      questionsResult.error,
+      `[ScheduledTaskExecutor] Failed to list pending forms: sessionId=${sessionId}`,
+      formsResult.error,
     );
   }
 
-  const question = questionsResult.data?.data.find((item) => item.sessionID === sessionId);
-  if (question) {
-    return { kind: "question", request: question };
+  if (formsResult.data) {
+    return { kind: "question", request: formsResult.data };
   }
 
   if (permissionsResult.error) {
@@ -337,10 +337,7 @@ async function rejectInteractiveRequest(
 ): Promise<void> {
   try {
     if (request.kind === "question") {
-      const { error } = await opencodeV2.session.question.reject({
-        sessionID,
-        requestID: request.request.id,
-      });
+      const { error } = await cancelSessionForm(sessionID, request.request.id);
 
       if (error) {
         logger.warn(
@@ -407,7 +404,7 @@ async function failIfInteractiveRequest(
     kind: interactiveRequest.kind,
     requestId: interactiveRequest.request.id,
     ...(interactiveRequest.kind === "question"
-      ? { questionCount: interactiveRequest.request.questions?.length ?? 0 }
+      ? { fieldCount: interactiveRequest.request.fields?.length ?? 0 }
       : {
           permission: interactiveRequest.request.action,
           patterns: interactiveRequest.request.resources,

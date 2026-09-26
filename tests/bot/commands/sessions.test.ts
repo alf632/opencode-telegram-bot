@@ -21,6 +21,7 @@ const mocked = vi.hoisted(() => ({
   sessionListMock: vi.fn(),
   sessionGetMock: vi.fn(),
   sessionMessagesMock: vi.fn(),
+  sessionMessagePageMock: vi.fn(),
   sessionStatusMock: vi.fn(),
   sessionMessageMock: vi.fn(),
   setCurrentSessionMock: vi.fn(),
@@ -46,6 +47,7 @@ vi.mock("../../../src/opencode/client.js", () => ({
   listSessions: mocked.sessionListMock,
   getBusySessionStatuses: mocked.sessionStatusMock,
   getSessionMessages: mocked.sessionMessagesMock,
+  getSessionMessagePage: mocked.sessionMessagePageMock,
   opencodeV2: {
     session: {
       get: mocked.sessionGetMock,
@@ -198,6 +200,11 @@ describe("bot/commands/sessions", () => {
     mocked.sessionGetMock.mockReset();
     mocked.sessionMessagesMock.mockReset();
     mocked.sessionMessagesMock.mockResolvedValue({ data: [], error: null });
+    mocked.sessionMessagePageMock.mockReset();
+    mocked.sessionMessagePageMock.mockResolvedValue({
+      data: { messages: [], nextCursor: undefined },
+      error: null,
+    });
     mocked.sessionStatusMock.mockReset();
     mocked.sessionStatusMock.mockResolvedValue({ data: {}, error: null });
     mocked.sessionMessageMock.mockReset();
@@ -412,19 +419,32 @@ describe("bot/commands/sessions", () => {
     );
   });
 
-  it("shows the latest finished reply when previewing a session", async () => {
+  it("pages past a newer prompt and shows the finished reply it answers", async () => {
     mocked.sessionGetMock.mockResolvedValueOnce({
       data: { data: createSession(0) },
       error: null,
     });
-    const messages = [
-      createSessionMessage("assistant", "older tool", 100),
-      createSessionMessage("user", "answered prompt", 150),
-      createSessionMessage("assistant", "finished reply", 200),
-      createSessionMessage("user", "unanswered prompt", 250),
-    ];
-    mocked.sessionMessagesMock.mockReset();
-    mocked.sessionMessagesMock.mockResolvedValueOnce({ data: messages, error: null });
+    // Newest page: 20 tool-only assistant turns plus a prompt nobody answered.
+    const firstPage = Array.from({ length: 20 }, (_, index) => ({
+      id: `page1-${index}`,
+      role: "assistant",
+      text: "",
+      created: 2000 + index,
+    }));
+    firstPage[19] = createSessionMessage("user", "unanswered prompt", 2019);
+    mocked.sessionMessagePageMock.mockReset();
+    mocked.sessionMessagePageMock
+      .mockResolvedValueOnce({ data: { messages: firstPage, nextCursor: "cursor-1" }, error: null })
+      .mockResolvedValueOnce({
+        data: {
+          messages: [
+            createSessionMessage("user", "answered prompt", 100),
+            createSessionMessage("assistant", "finished reply", 150),
+          ],
+          nextCursor: undefined,
+        },
+        error: null,
+      });
 
     startInteractionForTest(container.interactionManager, {
       kind: "inline",
@@ -438,14 +458,54 @@ describe("bot/commands/sessions", () => {
     const ctx = createCallbackContext("session:session-1", 456);
     await handleSessionSelect(ctx, createDeps());
 
+    expect(mocked.sessionMessagePageMock).toHaveBeenNthCalledWith(1, "session-1", {
+      limit: 20,
+      order: "desc",
+    });
+    expect(mocked.sessionMessagePageMock).toHaveBeenNthCalledWith(2, "session-1", {
+      limit: 20,
+      cursor: "cursor-1",
+    });
     const sent = (ctx.api.sendMessage as ReturnType<typeof vi.fn>).mock.calls.map(
       (call) => String(call[1]),
     );
+    expect(sent.some((text) => text.includes("answered prompt"))).toBe(true);
     expect(sent.some((text) => text.includes("finished reply"))).toBe(true);
-    expect(sent.some((text) => text.includes("answered prompt"))).toBe(false);
     expect(sent.some((text) => text.includes("unanswered prompt"))).toBe(false);
     expect(sent.some((text) => text.includes("Recent messages:"))).toBe(false);
     expect(safeBackgroundTaskMock).not.toHaveBeenCalled();
+  });
+
+  it("sends the empty notice when a later history page fails", async () => {
+    mocked.sessionGetMock.mockResolvedValueOnce({
+      data: { data: createSession(0) },
+      error: null,
+    });
+    const firstPage = Array.from({ length: 20 }, (_, index) =>
+      createSessionMessage("user", "only a prompt", 2000 + index),
+    );
+    mocked.sessionMessagePageMock.mockReset();
+    mocked.sessionMessagePageMock
+      .mockResolvedValueOnce({ data: { messages: firstPage, nextCursor: "cursor-1" }, error: null })
+      .mockResolvedValueOnce({ data: null, error: new Error("page failed") });
+
+    startInteractionForTest(container.interactionManager, {
+      kind: "inline",
+      expectedInput: "callback",
+      metadata: {
+        menuKind: "session",
+        messageId: 456,
+      },
+    });
+
+    const ctx = createCallbackContext("session:session-1", 456);
+    await handleSessionSelect(ctx, createDeps());
+
+    const sent = (ctx.api.sendMessage as ReturnType<typeof vi.fn>).mock.calls.map((call) =>
+      String(call[1]),
+    );
+    expect(sent).toContain(t("sessions.preview.empty"));
+    expect(sent.some((text) => text.includes("only a prompt"))).toBe(false);
   });
 
   it("does not show an in-flight reply when session status cannot be read", async () => {
@@ -454,12 +514,15 @@ describe("bot/commands/sessions", () => {
       error: null,
     });
     mocked.sessionStatusMock.mockResolvedValueOnce({ error: { message: "down" } });
-    mocked.sessionMessagesMock.mockReset();
-    mocked.sessionMessagesMock.mockResolvedValueOnce({
-      data: [
-        createSessionMessage("user", "the prompt", 1),
-        createSessionMessage("assistant", "partial reply", 2),
-      ],
+    mocked.sessionMessagePageMock.mockReset();
+    mocked.sessionMessagePageMock.mockResolvedValueOnce({
+      data: {
+        messages: [
+          createSessionMessage("user", "the prompt", 1),
+          createSessionMessage("assistant", "partial reply", 2),
+        ],
+        nextCursor: undefined,
+      },
       error: null,
     });
 
@@ -490,8 +553,11 @@ describe("bot/commands/sessions", () => {
     const messages = Array.from({ length: 5 }, (_, index) =>
       createSessionMessage("user", "only a prompt", 2000 + index),
     );
-    mocked.sessionMessagesMock.mockReset();
-    mocked.sessionMessagesMock.mockResolvedValueOnce({ data: messages, error: null });
+    mocked.sessionMessagePageMock.mockReset();
+    mocked.sessionMessagePageMock.mockResolvedValueOnce({
+      data: { messages, nextCursor: undefined },
+      error: null,
+    });
 
     startInteractionForTest(container.interactionManager, {
       kind: "inline",

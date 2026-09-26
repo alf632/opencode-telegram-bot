@@ -238,6 +238,31 @@ function buildToolPart(
   };
 }
 
+// v2 sends session fields either nested in `data.info` or flat in `data` (the SDK
+// types are stale), so both shapes are accepted. The parent link must survive:
+// the aggregator and the background tracker recognise subagent sessions by
+// `info.parentID` and skip their permission/question requests.
+function buildSessionInfo(data: Record<string, unknown>, sessionID: string): Record<string, unknown> {
+  const base = isRecord(data.info) ? data.info : data;
+  const baseTime = isRecord(base.time) ? base.time : {};
+  const location = isRecord(data.location) ? data.location : {};
+  const parentID = str(base.parentID);
+  const title = str(base.title);
+  const created = num(baseTime.created) ?? num(data.created) ?? Date.now();
+
+  return {
+    ...base,
+    id: sessionID,
+    directory: str(base.directory) ?? str(location.directory),
+    ...(parentID ? { parentID } : {}),
+    ...(title ? { title } : {}),
+    time: {
+      created,
+      updated: num(baseTime.updated) ?? num(data.created) ?? Date.now(),
+    },
+  };
+}
+
 function translateV2Event(type: string, data: Record<string, unknown>): BotEvent | null {
   const sessionID = str(data.sessionID);
   switch (type) {
@@ -326,20 +351,16 @@ function translateV2Event(type: string, data: Record<string, unknown>): BotEvent
       }
       return { type: "question.asked", properties: { id, sessionID, questions: data.questions } };
     }
-    case "session.created": {
+    case "session.created":
+    case "session.updated": {
       if (!sessionID) {
         return null;
       }
-      const location = isRecord(data.location) ? data.location : {};
       return {
-        type: "session.created",
+        type,
         properties: {
           ...data,
-          info: {
-            id: sessionID,
-            directory: str(location.directory),
-            time: { updated: num(data.created) ?? Date.now() },
-          },
+          info: buildSessionInfo(data, sessionID),
         },
       };
     }

@@ -18,6 +18,7 @@ import {
   __setSseIdleTimeoutForTests,
   stopEventListening,
   subscribeToEvents,
+  type EventEnvelope,
 } from "../../src/opencode/events.js";
 import { logger } from "../../src/utils/logger.js";
 import { defined } from "../helpers/defined.js";
@@ -67,6 +68,26 @@ function makeV2Event(
   directory: string | null = "D:/repo",
 ) {
   return directory === null ? { type, data } : { type, data, location: { directory } };
+}
+
+async function receiveEvent(event: unknown): Promise<EventEnvelope> {
+  subscribeMock.mockResolvedValueOnce({ stream: createStream([event]) });
+
+  const callback = vi.fn();
+  const subscription = subscribeToEvents("D:/repo", callback);
+  await vi.waitFor(() => {
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+  await flushImmediate();
+
+  stopEventListening();
+  await subscription;
+
+  return defined(callback.mock.calls[0]?.[0]);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
 describe("opencode/events", () => {
@@ -125,6 +146,84 @@ describe("opencode/events", () => {
       directory: "D:/repo",
       event: { type: "session.idle", properties: { sessionID: "s1" } },
     });
+  });
+
+  it("keeps the parent link when bridging a flat session.created payload", async () => {
+    const envelope = await receiveEvent(
+      makeV2Event("session.created", {
+        sessionID: "s1",
+        parentID: "parent-1",
+        title: "Subagent",
+        location: { directory: "D:/repo" },
+      }),
+    );
+
+    expect(envelope.event.type).toBe("session.created");
+    const info = asRecord(envelope.event.properties.info);
+    expect(info.id).toBe("s1");
+    expect(info.parentID).toBe("parent-1");
+    expect(info.title).toBe("Subagent");
+    expect(info.directory).toBe("D:/repo");
+    expect(asRecord(info.time).created).toEqual(expect.any(Number));
+  });
+
+  it("keeps the parent link when bridging a nested session.created payload", async () => {
+    const envelope = await receiveEvent(
+      makeV2Event("session.created", {
+        sessionID: "s1",
+        location: { directory: "D:/repo" },
+        info: {
+          id: "s1",
+          parentID: "parent-1",
+          title: "Subagent",
+          time: { created: 111 },
+        },
+      }),
+    );
+
+    expect(envelope.event.type).toBe("session.created");
+    const info = asRecord(envelope.event.properties.info);
+    expect(info.id).toBe("s1");
+    expect(info.parentID).toBe("parent-1");
+    expect(info.title).toBe("Subagent");
+    expect(info.directory).toBe("D:/repo");
+    expect(asRecord(info.time).created).toBe(111);
+  });
+
+  it("keeps the parent link when bridging session.updated", async () => {
+    const envelope = await receiveEvent(
+      makeV2Event("session.updated", {
+        sessionID: "s1",
+        location: { directory: "D:/repo" },
+        info: {
+          id: "s1",
+          parentID: "parent-1",
+          title: "Subagent",
+          time: { updated: 5 },
+        },
+      }),
+    );
+
+    expect(envelope.event.type).toBe("session.updated");
+    const info = asRecord(envelope.event.properties.info);
+    expect(info.id).toBe("s1");
+    expect(info.parentID).toBe("parent-1");
+    expect(info.title).toBe("Subagent");
+    expect(info.directory).toBe("D:/repo");
+    const time = asRecord(info.time);
+    expect(time.updated).toBe(5);
+    expect(time.created).toEqual(expect.any(Number));
+  });
+
+  it("does not fabricate a parent link when the payload carries none", async () => {
+    const envelope = await receiveEvent(
+      makeV2Event("session.created", { sessionID: "s1", location: { directory: "D:/repo" } }),
+    );
+
+    const info = asRecord(envelope.event.properties.info);
+    expect(info.id).toBe("s1");
+    expect(info.directory).toBe("D:/repo");
+    expect(Object.keys(info)).not.toContain("parentID");
   });
 
   it("bridges tool lifecycle events into message.part.updated tool parts", async () => {

@@ -27,7 +27,9 @@ type EventStreamSubscription = {
 
 const RECONNECT_BASE_DELAY_MS = 1000;
 const RECONNECT_MAX_DELAY_MS = 15000;
-let sseIdleTimeoutMs = 30_000;
+// A v2 directory-scoped stream may deliver no heartbeat event during quiet periods, so a long
+// quiet span is normal; 120s avoids tearing down healthy streams while still recovering dead ones.
+let sseIdleTimeoutMs = 120_000;
 const FATAL_NO_STREAM_ERROR = "No stream returned from event subscription";
 const SSE_IDLE_TIMEOUT_ERROR = "SSE stream idle timeout";
 

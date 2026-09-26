@@ -1,5 +1,6 @@
 import { t } from "../../i18n/index.js";
 import type { BackgroundSessionNotification } from "../../app/managers/background-session-manager.js";
+import { logger } from "../../utils/logger.js";
 import { buildBackgroundSessionOpenKeyboard } from "../menus/session-selection-menu.js";
 import type { SessionTargetPolicy, TelegramEventDelivery } from "./telegram-event-delivery.js";
 
@@ -33,12 +34,19 @@ function formatBackgroundSessionNotification(notification: BackgroundSessionNoti
 
 /** Sends a background-session notice to the destination of its own session. */
 export function createBackgroundNoticeDelivery(
-  policy: Pick<SessionTargetPolicy, "getDestination">,
+  policy: Pick<SessionTargetPolicy, "getDestination" | "isForegroundSession">,
   delivery: TelegramEventDelivery,
 ): (notification: BackgroundSessionNotification) => Promise<void> {
   return async (notification) => {
     const destination = policy.getDestination(notification.sessionId);
     if (!destination) {
+      return;
+    }
+
+    if (policy.isForegroundSession(notification.sessionId)) {
+      logger.debug(
+        `[BackgroundNotice] Skipping notice for the followed session: session=${notification.sessionId}, kind=${notification.kind}`,
+      );
       return;
     }
 

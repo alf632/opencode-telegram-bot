@@ -92,12 +92,19 @@ async function restorePendingQuestion(
 ): Promise<boolean> {
   const { data: pendingForm, error } = await getSessionForm(sessionId);
 
-  if (error || !pendingForm) {
+  // A session with no pending form is the normal case, not a failure: the
+  // route answers 200 with an empty list. Only a real error is worth warning.
+  if (error) {
     if (isExpectedOpencodeUnavailableError(error)) {
       logger.warn("[Attach] OpenCode server unavailable; skipping pending form restore");
     } else {
       logger.warn("[Attach] Failed to load pending forms during attach:", error);
     }
+    return false;
+  }
+
+  if (!pendingForm) {
+    logger.debug("[Attach] No pending form to restore");
     return false;
   }
 

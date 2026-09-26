@@ -301,8 +301,18 @@ async function sendAllAnswersToAgent(
   // the answers were collected for, submitting them would be a type or key
   // mismatch the server rejects.
   const { data: form, error: formError } = await getSessionForm(sessionID);
-  if (formError || !form) {
+  if (formError) {
     logger.error("[QuestionHandler] Failed to read the pending form:", formError);
+    await bot.sendMessage(chatId, t("question.send_answers_error"));
+    return;
+  }
+
+  if (!form) {
+    // No error and no form: the agent settled it while the user was answering.
+    // A race, not a read failure, so it is an info and not an error.
+    logger.info(
+      `[QuestionHandler] Pending form ${requestID} is no longer pending in session ${sessionID}; dropping the collected answers`,
+    );
     await bot.sendMessage(chatId, t("question.send_answers_error"));
     return;
   }

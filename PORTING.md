@@ -82,6 +82,6 @@ shapes back to the v1-shaped aggregator.
 ## Verification
 
 - `npm run build`, `npm run lint`, `npm run typecheck` — clean.
-- `npm test` — 2052 passed / 178 files / 7 skipped.
+- `npm test` — 2055 passed / 178 files / 7 skipped.
 - Live Telegram smoke: prompts stream, tool calls / file diffs render, agent /
   model / context switching fixed.

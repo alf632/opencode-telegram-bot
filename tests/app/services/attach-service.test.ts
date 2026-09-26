@@ -40,6 +40,7 @@ const mocked = vi.hoisted(() => ({
   keyboardUpdateContextMock: vi.fn(),
   showCurrentQuestionMock: vi.fn(),
   showPermissionRequestMock: vi.fn(),
+  loggerWarnMock: vi.fn(),
   ensureEventSubscriptionMock: vi.fn(),
   stopEventListeningMock: vi.fn(),
 }));
@@ -80,6 +81,15 @@ vi.mock("../../../src/bot/menus/question-menu.js", () => ({
 
 vi.mock("../../../src/bot/menus/permission-menu.js", () => ({
   showPermissionRequest: mocked.showPermissionRequestMock,
+}));
+
+vi.mock("../../../src/utils/logger.js", () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: mocked.loggerWarnMock,
+    error: vi.fn(),
+  },
 }));
 
 function createDeps(): AppContainer {
@@ -187,6 +197,7 @@ describe("attach/service", () => {
     mocked.showCurrentQuestionMock.mockResolvedValue(undefined);
     mocked.showPermissionRequestMock.mockReset();
     mocked.showPermissionRequestMock.mockResolvedValue(undefined);
+    mocked.loggerWarnMock.mockReset();
     mocked.ensureEventSubscriptionMock.mockReset();
     mocked.ensureEventSubscriptionMock.mockResolvedValue(undefined);
     mocked.stopEventListeningMock.mockReset();
@@ -276,6 +287,43 @@ describe("attach/service", () => {
       question: "Continue?",
       options: [{ label: "Yes", description: "continue" }],
     });
+  });
+
+  it("stays quiet when the session simply has no pending form", async () => {
+    // GET /form answers 200 with an empty list for most sessions, so "no form"
+    // is the normal path and must not be reported as a load failure.
+    mocked.getSessionFormMock.mockResolvedValue({ data: null, error: null });
+
+    const result = await attachToSession({
+      ...deps,
+      bot: createBot(),
+      chatId: 777,
+      session: mocked.currentSession!,
+      ensureEventSubscription: mocked.ensureEventSubscriptionMock,
+    });
+
+    expect(result.restoredQuestion).toBe(false);
+    expect(mocked.showCurrentQuestionMock).not.toHaveBeenCalled();
+    expect(mocked.loggerWarnMock).not.toHaveBeenCalled();
+  });
+
+  it("warns when the pending form lookup fails", async () => {
+    const error = new Error("HTTP 500 for GET");
+    mocked.getSessionFormMock.mockResolvedValue({ data: null, error });
+
+    const result = await attachToSession({
+      ...deps,
+      bot: createBot(),
+      chatId: 777,
+      session: mocked.currentSession!,
+      ensureEventSubscription: mocked.ensureEventSubscriptionMock,
+    });
+
+    expect(result.restoredQuestion).toBe(false);
+    expect(mocked.loggerWarnMock).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to load pending forms during attach"),
+      error,
+    );
   });
 
   it("restores a detached child permission and attributes it to the followed root", async () => {

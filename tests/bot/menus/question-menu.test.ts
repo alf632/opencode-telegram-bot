@@ -8,6 +8,8 @@ import type { AppContainer } from "../../../src/app/bootstrap/app-container.js";
 const mocked = vi.hoisted(() => ({
   getSessionFormMock: vi.fn(),
   replyToSessionFormMock: vi.fn(),
+  loggerInfoMock: vi.fn(),
+  loggerErrorMock: vi.fn(),
 }));
 
 vi.mock("../../../src/app/stores/settings-store.js", () => ({
@@ -22,6 +24,15 @@ vi.mock("../../../src/app/services/session-form-service.js", async (importOrigin
   ...(await importOriginal<typeof import("../../../src/app/services/session-form-service.js")>()),
   getSessionForm: mocked.getSessionFormMock,
   replyToSessionForm: mocked.replyToSessionFormMock,
+}));
+
+vi.mock("../../../src/utils/logger.js", () => ({
+  logger: {
+    debug: vi.fn(),
+    info: mocked.loggerInfoMock,
+    warn: vi.fn(),
+    error: mocked.loggerErrorMock,
+  },
 }));
 
 const FORM = {
@@ -68,6 +79,8 @@ beforeEach(() => {
   mocked.getSessionFormMock.mockResolvedValue({ data: FORM, error: null });
   mocked.replyToSessionFormMock.mockReset();
   mocked.replyToSessionFormMock.mockResolvedValue({ error: null });
+  mocked.loggerInfoMock.mockReset();
+  mocked.loggerErrorMock.mockReset();
 });
 
 describe("bot/menus/question-menu", () => {
@@ -231,10 +244,8 @@ describe("bot/menus/question-menu", () => {
   });
 
   it("reports a failure when the pending form cannot be read", async () => {
-    mocked.getSessionFormMock.mockResolvedValue({
-      data: null,
-      error: new Error("HTTP 404 for GET"),
-    });
+    const error = new Error("HTTP 404 for GET");
+    mocked.getSessionFormMock.mockResolvedValue({ data: null, error });
     deps.questionManager.startQuestions(
       [{ header: "Mode", question: "How to run", options: [] }],
       "frm_1",
@@ -245,5 +256,35 @@ describe("bot/menus/question-menu", () => {
 
     expect(mocked.replyToSessionFormMock).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledWith(42, t("question.send_answers_error"));
+    expect(mocked.loggerErrorMock).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to read the pending form"),
+      error,
+    );
+    expect(mocked.loggerInfoMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("no longer pending"),
+    );
+  });
+
+  it("treats a vanished pending form as a race, not a read failure", async () => {
+    // The agent can settle the form while the user is still answering it, so
+    // the route answering "no form" is a normal outcome, not an error.
+    mocked.getSessionFormMock.mockResolvedValue({ data: null, error: null });
+    deps.questionManager.startQuestions(
+      [{ header: "Mode", question: "How to run", options: [] }],
+      "frm_1",
+    );
+    deps.questionManager.setCustomAnswer(0, "build");
+    const { ctx, sendMessage } = createContext();
+
+    await showNextQuestion(ctx, deps);
+
+    expect(mocked.replyToSessionFormMock).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(42, t("question.send_answers_error"));
+    expect(mocked.loggerErrorMock).not.toHaveBeenCalled();
+    expect(mocked.loggerInfoMock).toHaveBeenCalledWith(
+      expect.stringContaining("no longer pending"),
+    );
+    expect(mocked.loggerInfoMock).toHaveBeenCalledWith(expect.stringContaining("frm_1"));
+    expect(mocked.loggerInfoMock).toHaveBeenCalledWith(expect.stringContaining("session-1"));
   });
 });

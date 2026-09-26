@@ -256,6 +256,88 @@ describe("bot/menus/question-menu", () => {
     });
   });
 
+  it("keeps the typed text of a multiselect field that allows custom entries", async () => {
+    mocked.getSessionFormMock.mockResolvedValue({
+      data: {
+        ...FORM,
+        fields: [
+          {
+            key: "targets",
+            type: "multiselect",
+            title: "Targets",
+            custom: true,
+            options: [
+              { value: "web", label: "Web", description: "" },
+              { value: "api", label: "API", description: "" },
+            ],
+          },
+        ],
+      },
+      error: null,
+    });
+    deps.questionManager.startQuestions(
+      [
+        {
+          header: "Targets",
+          question: "Targets",
+          options: [
+            { label: "Web", description: "" },
+            { label: "API", description: "" },
+          ],
+          multiple: true,
+        },
+      ],
+      "frm_1",
+    );
+    deps.questionManager.selectOption(0, 0);
+    deps.questionManager.setCustomAnswer(0, "my own");
+    const { ctx } = createContext();
+
+    await showNextQuestion(ctx, deps);
+
+    // `custom: true` lets the server accept text items, so it belongs in the
+    // same array as the option values.
+    expect(mocked.replyToSessionFormMock).toHaveBeenCalledWith("session-1", "frm_1", {
+      targets: ["web", "my own"],
+    });
+  });
+
+  it("sends the typed text alone when a custom multiselect has no option picked", async () => {
+    mocked.getSessionFormMock.mockResolvedValue({
+      data: {
+        ...FORM,
+        fields: [
+          {
+            key: "targets",
+            type: "multiselect",
+            title: "Targets",
+            custom: true,
+            options: [{ value: "web", label: "Web", description: "" }],
+          },
+        ],
+      },
+      error: null,
+    });
+    deps.questionManager.startQuestions(
+      [
+        {
+          header: "Targets",
+          question: "Targets",
+          options: [{ label: "Web", description: "" }],
+          multiple: true,
+        },
+      ],
+      "frm_1",
+    );
+    deps.questionManager.setCustomAnswer(0, "my own");
+    const { ctx } = createContext();
+
+    await showNextQuestion(ctx, deps);
+
+    expect(mocked.replyToSessionFormMock).toHaveBeenCalledWith("session-1", "frm_1", {
+      targets: ["my own"],
+    });
+  });
   it("reads a boolean answer as false for anything that is not yes or true", async () => {
     mocked.getSessionFormMock.mockResolvedValue({
       data: { ...FORM, fields: [{ key: "flag", type: "boolean", title: "Flag" }] },

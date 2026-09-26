@@ -29,6 +29,9 @@ export interface SessionFormField {
   title?: string;
   description?: string;
   options?: SessionFormOption[];
+  // A multiselect may declare that entries the user invents are accepted too,
+  // alongside the values in `options`.
+  custom?: boolean;
 }
 
 export interface SessionFormInfo {

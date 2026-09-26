@@ -349,12 +349,14 @@ async function rejectInteractiveRequest(
       return;
     }
 
-    const { error } = await opencodeV2.session.permission.reply({
-      sessionID,
-      requestID: request.request.id,
-      reply: "reject",
-      message: INTERACTIVE_PERMISSION_REJECT_MESSAGE,
-    });
+    // 2.0.16 names the body key `decision`, not `reply`; the SDK is still
+    // generated against the older v2, and `additionalProperties: false` means
+    // the old body is rejected outright rather than partly understood.
+    const { error } = await directApi(
+      "POST",
+      `/api/session/${sessionID}/permission/${request.request.id}/reply`,
+      { decision: "reject", message: INTERACTIVE_PERMISSION_REJECT_MESSAGE },
+    );
 
     if (error) {
       logger.warn(

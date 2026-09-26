@@ -11,7 +11,6 @@ const mocked = vi.hoisted(() => ({
   getSessionFormMock: vi.fn(),
   cancelSessionFormMock: vi.fn(),
   permissionListMock: vi.fn(),
-  permissionReplyMock: vi.fn(),
   cleanupIgnoresMock: vi.fn(),
   registerIgnoreMock: vi.fn(),
   loggerWarnMock: vi.fn(),
@@ -31,7 +30,6 @@ vi.mock("../../../src/opencode/client.js", () => ({
       interrupt: mocked.interruptMock,
       permission: {
         list: mocked.permissionListMock,
-        reply: mocked.permissionReplyMock,
       },
     },
   },
@@ -126,14 +124,12 @@ describe("app/services/scheduled-task-executor-service", () => {
     mocked.getSessionFormMock.mockReset();
     mocked.cancelSessionFormMock.mockReset();
     mocked.permissionListMock.mockReset();
-    mocked.permissionReplyMock.mockReset();
     mocked.cleanupIgnoresMock.mockReset();
     mocked.registerIgnoreMock.mockReset();
     mocked.loggerWarnMock.mockReset();
     mocked.getSessionFormMock.mockResolvedValue({ data: null, error: null });
     mocked.cancelSessionFormMock.mockResolvedValue({ error: null });
     mocked.permissionListMock.mockResolvedValue({ data: { data: [] }, error: null });
-    mocked.permissionReplyMock.mockResolvedValue({ data: true, error: null });
     mocked.interruptMock.mockResolvedValue({ data: true, error: null });
     mocked.directApiMock.mockResolvedValue({ data: null, error: null });
     mocked.cleanupIgnoresMock.mockResolvedValue(0);
@@ -623,12 +619,15 @@ describe("app/services/scheduled-task-executor-service", () => {
       resultText: null,
       errorMessage: "Scheduled task requested interactive permission and cannot continue unattended.",
     });
-    expect(mocked.permissionReplyMock).toHaveBeenCalledWith({
-      sessionID: "session-1",
-      requestID: "permission-1",
-      reply: "reject",
-      message: "Scheduled task cannot continue because it requires interactive permission.",
-    });
+    // 2.0.16 names the body key `decision`; the SDK still sends `reply`.
+    expect(mocked.directApiMock).toHaveBeenCalledWith(
+      "POST",
+      "/api/session/session-1/permission/permission-1/reply",
+      {
+        decision: "reject",
+        message: "Scheduled task cannot continue because it requires interactive permission.",
+      },
+    );
     expect(mocked.interruptMock).toHaveBeenCalledWith({
       sessionID: "session-1",
     });
@@ -672,7 +671,11 @@ describe("app/services/scheduled-task-executor-service", () => {
       errorMessage: null,
     });
     expect(mocked.cancelSessionFormMock).not.toHaveBeenCalled();
-    expect(mocked.permissionReplyMock).not.toHaveBeenCalled();
+    expect(mocked.directApiMock).not.toHaveBeenCalledWith(
+      "POST",
+      expect.stringContaining("/permission/"),
+      expect.anything(),
+    );
     expect(mocked.interruptMock).not.toHaveBeenCalled();
     expect(mocked.directApiMock).toHaveBeenCalledWith("DELETE", "/api/session/session-1");
   });

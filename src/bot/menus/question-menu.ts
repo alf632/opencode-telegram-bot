@@ -225,10 +225,10 @@ async function showPollSummary(
 // one wrong value loses every answer the user just gave. The rules, per field
 // type: an external field is acknowledged with `true` and nothing else, a
 // multiselect is a string[] of the field's own option values (the typed text
-// cannot stand in for it), a typed answer becomes yes/true for a boolean and a
-// finite number for number/integer, and a string is sent as typed. Selected
-// options are already the server's own values. Unanswered fields, and a number
-// the user did not type, are simply omitted.
+// only joins the array when the field declares `custom`), a typed answer
+// becomes yes/true for a boolean and a finite number for number/integer, and a
+// string is sent as typed. Selected options are already the server's own
+// values. Unanswered fields, and a number the user did not type, are omitted.
 const BOOLEAN_TRUE_ANSWER = /^(yes|true)$/i;
 
 function coerceFormAnswer(
@@ -244,8 +244,12 @@ function coerceFormAnswer(
 
   // A multiselect must stay a string[] of option values: a bare string is
   // rejected, and so is an array holding text the user typed, because the
-  // items are validated against the options.
+  // items are validated against the options. A field that declares `custom`
+  // is the one case where the server also takes text, so it joins the array.
   if (field.type === "multiselect") {
+    if (field.custom && typedAnswer !== undefined) {
+      return [...selectedValues, typedAnswer];
+    }
     return selectedValues.length > 0 ? selectedValues : undefined;
   }
 

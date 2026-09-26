@@ -60,6 +60,21 @@ describe("context compaction flow", () => {
     expect(confirm.api.editMessageText).toHaveBeenCalledWith(100, 8, t("context.success"));
   });
 
+  it("reports a failure in the progress message when compaction is rejected", async () => {
+    const error = new Error("HTTP 500 for POST /api/session/session/compact");
+    mocked.compact.mockResolvedValue({ data: null, error });
+    const deps = createTestAppContainer();
+    deps.interactionManager.start({ kind: "inline", expectedInput: "callback", metadata: { menuKind: "context", messageId: 7, stage: "confirm" } });
+
+    const confirm = callback("compact:confirm");
+    await expect(handleCompactConfirm(confirm, deps)).resolves.toBe(true);
+
+    expect(mocked.compact).toHaveBeenCalledWith("POST", "/api/session/session/compact", {});
+    expect(confirm.api.editMessageText).toHaveBeenCalledWith(100, 8, t("context.error"));
+    expect(confirm.api.editMessageText).not.toHaveBeenCalledWith(100, 8, t("context.success"));
+    expect(deps.interactionManager.getSnapshot()).toBeNull();
+  });
+
   it("closes details or cancels confirmation without compacting", async () => {
     for (const stage of ["details", "confirm"]) {
       const deps = createTestAppContainer();

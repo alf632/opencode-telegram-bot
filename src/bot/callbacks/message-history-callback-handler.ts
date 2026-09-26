@@ -2,7 +2,7 @@ import type { Bot, Context } from "grammy";
 import type { AppContainer } from "../../app/bootstrap/app-container.js";
 import { config } from "../../config.js";
 import type { InteractionState } from "../../app/types/interaction.js";
-import { opencodeClient } from "../../opencode/client.js";
+import { directApi, opencodeV2 } from "../../opencode/client.js";
 import { setCurrentSession } from "../../app/services/session-service.js";
 import { applySessionSettings } from "../../app/services/session-settings-service.js";
 import { getStoredAgent } from "../../app/services/agent-selection-service.js";
@@ -20,6 +20,15 @@ import { safeBackgroundTask } from "../../utils/safe-background-task.js";
 import { renderAssistantFinalPartsSafe } from "../messages/assistant-rendering.js";
 import { replyBusyBlocked } from "../messages/busy-blocked-renderer.js";
 import { sendRenderedBotPart } from "../messages/telegram-text.js";
+
+interface ForkedSessionInfo {
+  id: string;
+  title: string;
+  agent?: string | undefined;
+  model?: { providerID: string; id: string; variant?: string } | undefined;
+  location?: { directory: string } | undefined;
+  time?: { updated?: number } | undefined;
+}
 import {
   buildMessageDetailKeyboard,
   buildMessagesListKeyboard,
@@ -235,11 +244,14 @@ export async function handleMessagesCallback(
       await ctx.answerCallbackQuery();
 
       try {
-        await opencodeClient.session.revert({
+        const { error: revertError } = await opencodeV2.session.revert.stage({
           sessionID: metadata.sessionId,
-          directory: metadata.projectDirectory,
           messageID: selectedMessage.id,
         });
+
+        if (revertError) {
+          throw revertError;
+        }
 
         const successText = t("messages.revert_success", { text: selectedMessage.text });
         await ctx.editMessageText(truncateMessageHistoryText(successText, TELEGRAM_MESSAGE_LIMIT));
@@ -268,15 +280,17 @@ export async function handleMessagesCallback(
       await ctx.answerCallbackQuery();
 
       try {
-        const { data: forkedSession, error: forkError } = await opencodeClient.session.fork({
-          sessionID: metadata.sessionId,
-          messageID: selectedMessage.id,
-          directory: metadata.projectDirectory,
-        });
+        const { data: forkBody, error: forkError } = await directApi<{ data: ForkedSessionInfo }>(
+          "POST",
+          `/api/session/${metadata.sessionId}/fork`,
+          { before: selectedMessage.id },
+        );
 
-        if (forkError || !forkedSession) {
+        if (forkError || !forkBody) {
           throw forkError || new Error("No session data received from fork");
         }
+
+        const forkedSession: ForkedSessionInfo = forkBody.data ?? forkBody;
 
         logger.info(
           `[Messages] Forked session: id=${forkedSession.id}, title="${forkedSession.title}", from message=${selectedMessage.id}`,
@@ -295,7 +309,12 @@ export async function handleMessagesCallback(
         deps.keyboardManager.updateAgent(getStoredAgent());
         deps.keyboardManager.updateModel(getStoredModel());
         deps.resetInteractions("session_forked");
-        await ingestSessionInfoForCache(forkedSession);
+        await ingestSessionInfoForCache({
+          directory: forkedSession.location?.directory ?? metadata.projectDirectory,
+          ...(forkedSession.time?.updated !== undefined
+            ? { time: { updated: forkedSession.time.updated } }
+            : {}),
+        });
 
         await attachToSession({
           ...deps,

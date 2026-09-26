@@ -1,5 +1,5 @@
 import type { Bot, Context } from "grammy";
-import { opencodeClient } from "../../opencode/client.js";
+import { getBusySessionStatuses, opencodeV2 } from "../../opencode/client.js";
 import { isOpencodeServerHealthy } from "../../opencode/ready-refresh.js";
 import type { AppContainer } from "../bootstrap/app-container.js";
 import type { PermissionRequest } from "../types/permission.js";
@@ -87,10 +87,10 @@ async function restorePendingQuestion(
   bot: Bot<Context>,
   chatId: number,
   sessionId: string,
-  directory: string,
+  _directory: string,
 ): Promise<boolean> {
-  const { data, error } = await opencodeClient.question.list({
-    directory,
+  const { data, error } = await opencodeV2.session.question.list({
+    sessionID: sessionId,
   });
 
   if (error || !data) {
@@ -102,7 +102,7 @@ async function restorePendingQuestion(
     return false;
   }
 
-  const pendingQuestion = data.find((request) => request.sessionID === sessionId);
+  const pendingQuestion = data.data[0];
   if (!pendingQuestion || !attachPresentation) {
     return false;
   }
@@ -120,8 +120,8 @@ async function restorePendingPermissions(
   directory: string,
   questionActive: boolean,
 ): Promise<number> {
-  const { data, error } = await opencodeClient.permission.list({
-    directory,
+  const { data, error } = await opencodeV2.session.permission.list({
+    sessionID: sessionId,
   });
 
   if (error || !data) {
@@ -133,14 +133,21 @@ async function restorePendingPermissions(
     return 0;
   }
 
-  const pendingPermissions: typeof data = [];
-  for (const request of data) {
+  const pendingPermissions: PermissionRequest[] = [];
+  for (const request of data.data) {
     const chain = await resolveSessionParentChain(request.sessionID, directory, new Set([sessionId]));
     if (!chain) continue;
     for (const link of chain.links.reverse()) {
       deps.summaryAggregator.registerRestoredPermissionChild(link.child, link.parent);
     }
-    pendingPermissions.push(request);
+    pendingPermissions.push({
+      id: request.id,
+      sessionID: request.sessionID,
+      permission: request.action,
+      patterns: request.resources,
+      metadata: request.metadata ?? {},
+      always: request.save ?? [],
+    });
   }
   if (!attachPresentation) {
     return 0;
@@ -179,9 +186,7 @@ export async function attachToSession(deps: AttachSessionDeps): Promise<AttachSe
     summaryAggregator.setBotAndChatId(bot, chatId);
   }
 
-  const { data: statuses, error: statusesError } = await opencodeClient.session.status({
-    directory: session.directory,
-  });
+  const { data: statuses, error: statusesError } = await getBusySessionStatuses();
 
   if (statusesError) {
     if (isExpectedOpencodeUnavailableError(statusesError)) {

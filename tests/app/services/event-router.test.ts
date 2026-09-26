@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Event } from "@opencode-ai/sdk/v2";
-import type { EventEnvelope } from "../../../src/opencode/events.js";
+import type { BotEvent, EventEnvelope } from "../../../src/opencode/events.js";
 
 const mocked = vi.hoisted(() => ({
   reconcileBusyState: vi.fn(),
@@ -52,7 +51,7 @@ function createDeps() {
 }
 
 function envelope(event: Record<string, unknown>, directory = "d:/repo/"): EventEnvelope {
-  return { directory, event: event as unknown as Event };
+  return { directory, event: event as unknown as BotEvent };
 }
 
 describe("app/services/event-router", () => {

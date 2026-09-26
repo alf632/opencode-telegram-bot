@@ -46,6 +46,17 @@ vi.mock("../../../src/utils/logger.js", () => ({
   },
 }));
 
+vi.mock("../../../src/runtime/container.js", () => ({
+  isContainerRuntime: vi.fn(() => {
+    const value = process.env.OPENCODE_TELEGRAM_CONTAINER;
+    if (value === undefined) {
+      return false;
+    }
+    const normalized = value.trim().toLowerCase();
+    return normalized !== "" && normalized !== "0" && normalized !== "false" && normalized !== "no";
+  }),
+}));
+
 vi.mock("../../../src/app/services/attach-service.js", () => ({
   markAttachedSessionIdle: mocked.markAttachedSessionIdleMock,
 }));

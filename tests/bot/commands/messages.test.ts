@@ -73,14 +73,16 @@ vi.mock("../../../src/app/services/session-cache-service.js", () => ({
 }));
 
 vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
+  getSessionMessages: mocked.sessionMessagesMock,
+  opencodeV2: {
     session: {
-      messages: mocked.sessionMessagesMock,
       get: mocked.sessionGetMock,
-      revert: mocked.sessionRevertMock,
-      fork: mocked.sessionForkMock,
+      revert: {
+        stage: mocked.sessionRevertMock,
+      },
     },
   },
+  directApi: mocked.sessionForkMock,
 }));
 
 function createCommandContext(messageId: number): Context {
@@ -114,12 +116,10 @@ let testDeps: MessagesCallbackDeps;
 
 function makeUserMessage(id: string, text: string, created: number) {
   return {
-    info: {
-      id,
-      role: "user",
-      time: { created },
-    },
-    parts: [{ type: "text", text }],
+    id,
+    role: "user",
+    text,
+    created,
   };
 }
 
@@ -168,7 +168,7 @@ describe("bot/commands/messages", () => {
 
     // Default: session without revert
     mocked.sessionGetMock.mockResolvedValue({
-      data: { id: "session-1", directory: "D:\\Projects\\Repo" },
+      data: { data: { id: "session-1", directory: "D:\\Projects\\Repo" } },
       error: null,
     });
   });
@@ -213,11 +213,7 @@ describe("bot/commands/messages", () => {
     mocked.sessionMessagesMock.mockResolvedValue({
       data: [
         makeUserMessage("old", "older prompt", oldTime),
-        {
-          info: { id: "assistant-1", role: "assistant", time: { created: newTime + 1 } },
-          parts: [{ type: "text", text: "assistant reply" }],
-        },
-        makeUserMessage("empty", "", newTime + 2),
+        { id: "assistant-1", role: "assistant", text: "assistant reply", created: newTime + 1 },
         makeUserMessage("new", "newer prompt with\nline break", newTime),
       ],
       error: null,
@@ -226,10 +222,7 @@ describe("bot/commands/messages", () => {
     const ctx = createCommandContext(200);
     await messagesCommand(ctx as never, testDeps);
 
-    expect(mocked.sessionMessagesMock).toHaveBeenCalledWith({
-      sessionID: "session-1",
-      directory: "D:\\Projects\\Repo",
-    });
+    expect(mocked.sessionMessagesMock).toHaveBeenCalledWith("session-1");
 
     const [, options] = defined((ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0]) as [
       string,
@@ -256,12 +249,7 @@ describe("bot/commands/messages", () => {
 
   it("shows empty state when there are no user messages", async () => {
     mocked.sessionMessagesMock.mockResolvedValue({
-      data: [
-        {
-          info: { id: "assistant-1", role: "assistant", time: { created: 1 } },
-          parts: [{ type: "text", text: "assistant reply" }],
-        },
-      ],
+      data: [{ id: "assistant-1", role: "assistant", text: "assistant reply", created: 1 }],
       error: null,
     });
 
@@ -288,9 +276,11 @@ describe("bot/commands/messages", () => {
     // Session has revert to msg-2, so only msg-1 should be shown
     mocked.sessionGetMock.mockResolvedValue({
       data: {
-        id: "session-1",
-        directory: "D:\\Projects\\Repo",
-        revert: { messageID: "msg-2" },
+        data: {
+          id: "session-1",
+          directory: "D:\\Projects\\Repo",
+          revert: { messageID: "msg-2" },
+        },
       },
       error: null,
     });
@@ -491,7 +481,6 @@ describe("bot/commands/messages", () => {
     expect(ctx.answerCallbackQuery).toHaveBeenCalledWith();
     expect(mocked.sessionRevertMock).toHaveBeenCalledWith({
       sessionID: "session-1",
-      directory: "D:\\Projects\\Repo",
       messageID: "msg-1",
     });
     expect(ctx.editMessageText).toHaveBeenCalledWith(
@@ -526,7 +515,6 @@ describe("bot/commands/messages", () => {
     expect(ctx.answerCallbackQuery).toHaveBeenCalledWith();
     expect(mocked.sessionRevertMock).toHaveBeenCalledWith({
       sessionID: "session-1",
-      directory: "D:\\Projects\\Repo",
       messageID: "msg-1",
     });
     expect(ctx.editMessageText).toHaveBeenCalledWith(t("messages.revert_error"));
@@ -583,7 +571,7 @@ describe("bot/commands/messages", () => {
       title: "Forked Session",
       directory: "D:\\Projects\\Repo",
     };
-    mocked.sessionForkMock.mockResolvedValue({ data: forkedSession, error: null });
+    mocked.sessionForkMock.mockResolvedValue({ data: { data: forkedSession }, error: null });
     mocked.attachToSessionMock.mockResolvedValue({
       busy: false,
       alreadyAttached: false,
@@ -597,11 +585,11 @@ describe("bot/commands/messages", () => {
 
     expect(handled).toBe(true);
     expect(ctx.answerCallbackQuery).toHaveBeenCalledWith();
-    expect(mocked.sessionForkMock).toHaveBeenCalledWith({
-      sessionID: "session-1",
-      messageID: "msg-1",
-      directory: "D:\\Projects\\Repo",
-    });
+    expect(mocked.sessionForkMock).toHaveBeenCalledWith(
+      "POST",
+      "/api/session/session-1/fork",
+      { before: "msg-1" },
+    );
     expect(mocked.setCurrentSessionMock).toHaveBeenCalledWith({
       id: "session-2",
       title: "Forked Session",
@@ -638,7 +626,7 @@ describe("bot/commands/messages", () => {
       agent: "plan",
       model: { providerID: "opencode-go", id: "deepseek-v4-flash", variant: "high" },
     };
-    mocked.sessionForkMock.mockResolvedValue({ data: forkedSession, error: null });
+    mocked.sessionForkMock.mockResolvedValue({ data: { data: forkedSession }, error: null });
     mocked.attachToSessionMock.mockResolvedValue({
       busy: false,
       alreadyAttached: false,
@@ -685,11 +673,11 @@ describe("bot/commands/messages", () => {
 
     expect(handled).toBe(true);
     expect(ctx.answerCallbackQuery).toHaveBeenCalledWith();
-    expect(mocked.sessionForkMock).toHaveBeenCalledWith({
-      sessionID: "session-1",
-      messageID: "msg-1",
-      directory: "D:\\Projects\\Repo",
-    });
+    expect(mocked.sessionForkMock).toHaveBeenCalledWith(
+      "POST",
+      "/api/session/session-1/fork",
+      { before: "msg-1" },
+    );
     expect(ctx.editMessageText).toHaveBeenCalledWith(t("messages.fork_error"));
     expect(container.interactionManager.getSnapshot()).toBeNull();
   });

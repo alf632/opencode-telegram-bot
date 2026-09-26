@@ -1,6 +1,6 @@
 import { CommandContext, Context } from "grammy";
 import type { AppContainer } from "../../app/bootstrap/app-container.js";
-import { opencodeClient } from "../../opencode/client.js";
+import { getServerInfo } from "../../opencode/client.js";
 import { getGitWorktreeContext } from "../../app/services/worktree-service.js";
 import { getCurrentSession } from "../../app/services/session-service.js";
 import { getCurrentProject } from "../../app/stores/settings-store.js";
@@ -17,7 +17,7 @@ export type StatusCommandDeps = Pick<AppContainer, "keyboardManager" | "pinnedMe
 
 export async function statusCommand(ctx: CommandContext<Context>, deps: StatusCommandDeps) {
   try {
-    const { data, error } = await opencodeClient.global.health();
+    const { data, error } = await getServerInfo();
 
     if (error || !data) {
       throw error || new Error("No data received from server");

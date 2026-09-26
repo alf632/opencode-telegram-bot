@@ -1,7 +1,7 @@
 import type { Context } from "grammy";
 import type { AppContainer } from "../../app/bootstrap/app-container.js";
 import type { PermissionReply } from "../../app/types/permission.js";
-import { opencodeClient } from "../../opencode/client.js";
+import { opencodeV2 } from "../../opencode/client.js";
 import { getCurrentProject } from "../../app/stores/settings-store.js";
 import { getCurrentSession } from "../../app/services/session-service.js";
 import { clearPermissionInteraction, syncPermissionInteractionState } from "../menus/permission-menu.js";
@@ -151,28 +151,34 @@ async function handlePermissionReply(
     taskName: "permission.reply",
     task: async () => {
       let firstError: unknown = null;
-      let lastResponse: Awaited<ReturnType<typeof opencodeClient.permission.reply>> | null = null;
+      let lastResponse: Awaited<ReturnType<typeof opencodeV2.session.permission.reply>> | null =
+        null;
 
-      for (const requestID of requestIDs) {
-        const response = await opencodeClient.permission.reply({
-          requestID,
-          directory,
-          reply,
-        });
-        lastResponse = response;
+      const sessionID = currentSession?.id;
+      if (!sessionID) {
+        firstError = new Error("No active session for permission reply");
+      } else {
+        for (const requestID of requestIDs) {
+          const response = await opencodeV2.session.permission.reply({
+            sessionID,
+            requestID,
+            reply,
+          });
+          lastResponse = response;
 
-        if (!response.error) {
-          continue;
+          if (!response.error) {
+            continue;
+          }
+
+          if (requestIDs.length > 1 && isPermissionRequestNotFound(response.error)) {
+            logger.debug(
+              `[PermissionHandler] Ignoring duplicate permission reply miss: requestID=${requestID}`,
+            );
+            continue;
+          }
+
+          firstError ??= response.error;
         }
-
-        if (requestIDs.length > 1 && isPermissionRequestNotFound(response.error)) {
-          logger.debug(
-            `[PermissionHandler] Ignoring duplicate permission reply miss: requestID=${requestID}`,
-          );
-          continue;
-        }
-
-        firstError ??= response.error;
       }
 
       return { ...lastResponse, error: firstError };

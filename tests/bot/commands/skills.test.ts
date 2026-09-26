@@ -29,8 +29,8 @@ vi.mock("../../../src/app/stores/settings-store.js", () => ({
 }));
 
 vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    command: {
+  opencodeV2: {
+    skill: {
       list: mocked.commandListMock,
     },
   },
@@ -120,17 +120,17 @@ describe("bot/commands/skills", () => {
 
   it("shows skills list and starts custom interaction", async () => {
     mocked.commandListMock.mockResolvedValue({
-      data: [
+      data: { data: [
         { name: "borsch", description: "Cook borsch", source: "skill" },
         { name: "release", description: "Prepare release", source: "skill" },
-      ],
+      ]},
       error: null,
     });
 
     const ctx = createCommandContext(123);
     await skillsCommand(ctx as never, createDeps());
 
-    expect(mocked.commandListMock).toHaveBeenCalledWith({ directory: "D:/Projects/Repo" });
+    expect(mocked.commandListMock).toHaveBeenCalledWith({ location: { directory: "D:/Projects/Repo" } });
     expect(ctx.reply).toHaveBeenCalledTimes(1);
 
     const [, options] = defined((ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0]) as [
@@ -149,14 +149,12 @@ describe("bot/commands/skills", () => {
     expect(state?.metadata.messageId).toBe(123);
   });
 
-  it("filters out non-skill sources from skill list", async () => {
+  it("returns skills from the catalog", async () => {
     mocked.commandListMock.mockResolvedValue({
-      data: [
-        { name: "borsch", description: "Cook borsch", source: "skill" },
-        { name: "release", description: "Prepare release", source: "skill" },
-        { name: "review", description: "Review changes", source: "command" },
-        { name: "from-mcp", description: "MCP prompt", source: "mcp" },
-      ],
+      data: { data: [
+        { name: "borsch", description: "Cook borsch" },
+        { name: "release", description: "Prepare release" },
+      ]},
       error: null,
     });
 

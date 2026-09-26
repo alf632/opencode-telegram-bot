@@ -1,20 +1,20 @@
 import { CommandContext, Context } from "grammy";
-import { opencodeClient } from "../../opencode/client.js";
+import { fetchModelCatalog } from "../../opencode/catalog.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
 
 export async function modelsCommand(ctx: CommandContext<Context>) {
   try {
-    const { data: providersData, error } = await opencodeClient.config.providers();
+    const { data: catalog, error } = await fetchModelCatalog();
 
-    if (error || !providersData) {
+    if (error || !catalog) {
       await ctx.reply(t("legacy.models.fetch_error"));
       return;
     }
 
-    const providers = providersData.providers;
+    const { providers, models } = catalog;
 
-    if (!providers || providers.length === 0) {
+    if (providers.length === 0) {
       await ctx.reply(t("legacy.models.empty"));
       return;
     }
@@ -24,11 +24,11 @@ export async function modelsCommand(ctx: CommandContext<Context>) {
     for (const provider of providers) {
       message += `🔹 ${provider.id}\n`;
 
-      const models = Object.values(provider.models);
-      if (models.length === 0) {
+      const providerModels = models.filter((model) => model.providerID === provider.id);
+      if (providerModels.length === 0) {
         message += t("legacy.models.no_provider_models");
       } else {
-        for (const model of models) {
+        for (const model of providerModels) {
           message += `  - ${model.id}\n`;
         }
       }

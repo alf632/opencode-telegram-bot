@@ -53,19 +53,17 @@ vi.mock("../../../src/app/services/session-service.js", () => ({
 }));
 
 vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    global: {
-      health: mocked.healthMock,
-    },
+  getServerInfo: mocked.healthMock,
+  getBusySessionStatuses: mocked.sessionStatusMock,
+  opencodeV2: {
     session: {
-      status: mocked.sessionStatusMock,
       get: mocked.sessionGetMock,
-    },
-    question: {
-      list: mocked.questionListMock,
-    },
-    permission: {
-      list: mocked.permissionListMock,
+      question: {
+        list: mocked.questionListMock,
+      },
+      permission: {
+        list: mocked.permissionListMock,
+      },
     },
   },
 }));
@@ -158,9 +156,9 @@ describe("attach/service", () => {
     mocked.sessionGetMock.mockReset();
     mocked.registerRestoredPermissionChildMock.mockReset();
     mocked.questionListMock.mockReset();
-    mocked.questionListMock.mockResolvedValue({ data: [], error: null });
+    mocked.questionListMock.mockResolvedValue({ data: { data: [] }, error: null });
     mocked.permissionListMock.mockReset();
-    mocked.permissionListMock.mockResolvedValue({ data: [], error: null });
+    mocked.permissionListMock.mockResolvedValue({ data: { data: [] }, error: null });
     mocked.setSessionSummaryMock.mockReset();
     mocked.setBotAndChatIdMock.mockReset();
     mocked.pinnedIsInitializedMock.mockReset();
@@ -243,19 +241,21 @@ describe("attach/service", () => {
 
   it("restores a pending question when first following a session", async () => {
     mocked.questionListMock.mockResolvedValueOnce({
-      data: [
-        {
-          id: "question-1",
-          sessionID: "session-1",
-          questions: [
-            {
-              header: "Q1",
-              question: "Continue?",
-              options: [{ label: "Yes", description: "continue" }],
-            },
-          ],
-        },
-      ],
+      data: {
+        data: [
+          {
+            id: "question-1",
+            sessionID: "session-1",
+            questions: [
+              {
+                header: "Q1",
+                question: "Continue?",
+                options: [{ label: "Yes", description: "continue" }],
+              },
+            ],
+          },
+        ],
+      },
       error: null,
     });
 
@@ -272,9 +272,10 @@ describe("attach/service", () => {
   });
 
   it("restores a detached child permission and attributes it to the followed root", async () => {
+    const rawRequest = { id: "permission-child", sessionID: "child", action: "edit", resources: ["*"], metadata: {}, save: [] };
     const request = { id: "permission-child", sessionID: "child", permission: "edit", patterns: ["*"], metadata: {}, always: [] };
-    mocked.permissionListMock.mockResolvedValue({ data: [request], error: null });
-    mocked.sessionGetMock.mockResolvedValue({ data: { parentID: "session-1" }, error: null });
+    mocked.permissionListMock.mockResolvedValue({ data: { data: [rawRequest] }, error: null });
+    mocked.sessionGetMock.mockResolvedValue({ data: { data: { parentID: "session-1" } }, error: null });
 
     const result = await attachToSession({
       ...deps, bot: createBot(), chatId: 777, session: mocked.currentSession!,
@@ -287,9 +288,9 @@ describe("attach/service", () => {
   });
 
   it("queues a child permission behind a restored question", async () => {
-    mocked.questionListMock.mockResolvedValue({ data: [{ id: "question-1", sessionID: "session-1", questions: [] }], error: null });
-    mocked.permissionListMock.mockResolvedValue({ data: [{ id: "permission-child", sessionID: "child", permission: "edit", patterns: ["*"], metadata: {}, always: [] }], error: null });
-    mocked.sessionGetMock.mockResolvedValue({ data: { parentID: "session-1" }, error: null });
+    mocked.questionListMock.mockResolvedValue({ data: { data: [{ id: "question-1", sessionID: "session-1", questions: [] }] }, error: null });
+    mocked.permissionListMock.mockResolvedValue({ data: { data: [{ id: "permission-child", sessionID: "child", action: "edit", resources: ["*"], metadata: {}, save: [] }] }, error: null });
+    mocked.sessionGetMock.mockResolvedValue({ data: { data: { parentID: "session-1" } }, error: null });
 
     await attachToSession({
       ...deps, bot: createBot(), chatId: 777, session: mocked.currentSession!,

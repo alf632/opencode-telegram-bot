@@ -10,7 +10,7 @@ const mocked = vi.hoisted(() => ({
   currentProject: null as { worktree: string } | null,
 }));
 vi.mock("../../../src/app/services/recent-sessions-service.js", () => ({ loadRecentSessions: mocked.rows }));
-vi.mock("../../../src/opencode/client.js", () => ({ opencodeClient: { session: { get: mocked.get } } }));
+vi.mock("../../../src/opencode/client.js", () => ({ opencodeV2: { session: { get: mocked.get } } }));
 vi.mock("../../../src/app/services/project-switch-service.js", () => ({ switchToProject: mocked.switch }));
 vi.mock("../../../src/app/stores/settings-store.js", () => ({ getCurrentProject: () => mocked.currentProject }));
 vi.mock("../../../src/bot/callbacks/session-callback-handler.js", () => ({ selectSessionById: mocked.select }));
@@ -51,7 +51,7 @@ describe("/recent and picker", () => {
       kind: "inline", expectedInput: "callback",
       metadata: { menuKind: "recent", messageId: 20, sessionIds: ["s1"], directories: ["/linked"] },
     });
-    mocked.get.mockResolvedValue({ data: { id: "s1", projectID: "project", directory: "/linked", time: { updated: 10 } }, error: null });
+    mocked.get.mockResolvedValue({ data: { data: { id: "s1", projectID: "project", location: { directory: "/linked" }, time: { updated: 10 } } }, error: null });
     const ctx = context("recent:0");
     expect(await handleRecentSelect(ctx, { ...deps, bot: {} } as never)).toBe(true);
     expect(mocked.switch).toHaveBeenCalledWith(ctx, { id: "project", worktree: "/linked", name: "/linked" }, "recent_project_switched", expect.anything());

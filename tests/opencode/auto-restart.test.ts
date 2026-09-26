@@ -25,11 +25,7 @@ vi.mock("../../src/config.js", () => ({
 }));
 
 vi.mock("../../src/opencode/client.js", () => ({
-  opencodeClient: {
-    global: {
-      health: mocked.healthMock,
-    },
-  },
+  getServerInfo: mocked.healthMock,
 }));
 
 vi.mock("../../src/opencode/process.js", () => ({
@@ -44,6 +40,17 @@ vi.mock("../../src/utils/logger.js", () => ({
     warn: mocked.loggerWarnMock,
     error: mocked.loggerErrorMock,
   },
+}));
+
+vi.mock("../../src/runtime/container.js", () => ({
+  isContainerRuntime: vi.fn(() => {
+    const value = process.env.OPENCODE_TELEGRAM_CONTAINER;
+    if (value === undefined) {
+      return false;
+    }
+    const normalized = value.trim().toLowerCase();
+    return normalized !== "" && normalized !== "0" && normalized !== "false" && normalized !== "no";
+  }),
 }));
 
 import { OpencodeAutoRestartService } from "../../src/opencode/auto-restart.js";

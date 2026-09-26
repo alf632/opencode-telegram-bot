@@ -1,6 +1,6 @@
 import type { Bot, Context } from "grammy";
 import type { AppContainer } from "../../app/bootstrap/app-container.js";
-import { opencodeClient } from "../../opencode/client.js";
+import { getBusySessionStatuses, getSessionMessages, opencodeV2 } from "../../opencode/client.js";
 import { resolveProjectAgent } from "../../app/services/agent-selection-service.js";
 import { getStoredModel } from "../../app/services/model-selection-service.js";
 import { setCurrentSession } from "../../app/services/session-service.js";
@@ -57,19 +57,7 @@ interface SelectSessionByIdOptions {
 }
 
 const LATEST_ASSISTANT_RESPONSE_MESSAGES_LIMIT = 20;
-const SESSION_PICK_PAGE_SIZE = 20;
 const SESSION_PICK_SEND_GAP_MS = 1000;
-
-type SessionMessageLike = {
-  info: {
-    role?: string;
-    summary?: boolean;
-    time?: {
-      created?: number;
-    };
-  };
-  parts: Array<{ type: string; text?: string }>;
-};
 
 async function removeCallbackReplyMarkup(ctx: Context): Promise<void> {
   try {
@@ -93,14 +81,15 @@ export async function selectSessionById(
     return;
   }
 
-  const { data: session, error } = await opencodeClient.session.get({
+  const { data: sessionBody, error } = await opencodeV2.session.get({
     sessionID: sessionId,
-    directory: currentProject.worktree,
   });
 
-  if (error || !session) {
+  if (error || !sessionBody) {
     throw error || new Error("Failed to get session details");
   }
+
+  const session = sessionBody.data;
 
   logger.info(
     `[Bot] Session selected: id=${session.id}, title="${session.title}", project=${currentProject.worktree}, source=${options.source}`,
@@ -338,23 +327,6 @@ export async function handleSessionSelect(ctx: Context, deps: SessionSelectDeps)
   return true;
 }
 
-function extractTextParts(
-  parts: Array<{ type: string; text?: string }>,
-  options: { trim?: boolean } = {},
-): string | null {
-  const textParts = parts
-    .filter((part) => part.type === "text" && typeof part.text === "string")
-    .map((part) => part.text as string);
-
-  if (textParts.length === 0) {
-    return null;
-  }
-
-  const text = textParts.join("");
-  const normalizedText = options.trim === false ? text : text.trim();
-  return normalizedText.trim().length > 0 ? normalizedText : null;
-}
-
 function sessionPickSendGapMs(): number {
   return process.env.VITEST ? 0 : SESSION_PICK_SEND_GAP_MS;
 }
@@ -372,9 +344,9 @@ async function releaseSessionPickHold(
   await aggregator.drainOutbound(sessionPickSendGapMs());
 }
 
-async function readSessionBusy(sessionId: string, directory: string): Promise<boolean> {
+async function readSessionBusy(sessionId: string, _directory: string): Promise<boolean> {
   try {
-    const { data, error } = await opencodeClient.session.status({ directory });
+    const { data, error } = await getBusySessionStatuses();
     if (error || !data) {
       logger.warn("[Sessions] Failed to read session status for pick:", error);
       return true;
@@ -386,64 +358,35 @@ async function readSessionBusy(sessionId: string, directory: string): Promise<bo
   }
 }
 
+function mapNormalizedMessageToPickMessage(message: {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  created: number;
+}): SessionPickMessage {
+  return {
+    info: {
+      id: message.id,
+      role: message.role,
+      time: { created: message.created },
+    },
+    parts: [{ type: "text", text: message.text }],
+  };
+}
+
 async function loadSessionPickMessages(
   sessionId: string,
-  directory: string,
-  busy: boolean,
+  _directory: string,
+  _busy: boolean,
 ): Promise<SessionPickMessage[] | null> {
-  const loaded: SessionPickMessage[] = [];
-  const seen = new Set<string>();
-  let before: string | undefined;
-
   try {
-    for (;;) {
-      const { data, error } = await opencodeClient.session.messages({
-        sessionID: sessionId,
-        directory,
-        limit: SESSION_PICK_PAGE_SIZE,
-        ...(before ? { before } : {}),
-      });
-
-      if (error || !data) {
-        logger.warn("[Sessions] Failed to fetch session messages for pick:", error);
-        return null;
-      }
-
-      const pageMessages = data as SessionPickMessage[];
-      if (pageMessages.length === 0) {
-        return loaded;
-      }
-
-      let added = 0;
-      for (const message of pageMessages) {
-        const id = message.info.id;
-        if (id && seen.has(id)) {
-          continue;
-        }
-        if (id) {
-          seen.add(id);
-        }
-        loaded.push(message);
-        added += 1;
-      }
-
-      if (added === 0 || findEligibleReply(loaded, busy)) {
-        return loaded;
-      }
-      if (pageMessages.length < SESSION_PICK_PAGE_SIZE) {
-        return loaded;
-      }
-
-      const oldest = pageMessages.reduce((current, message) => {
-        const created = message.info.time?.created ?? 0;
-        const currentCreated = current.info.time?.created ?? 0;
-        return created < currentCreated ? message : current;
-      });
-      if (!oldest.info.id || oldest.info.id === before) {
-        return loaded;
-      }
-      before = oldest.info.id;
+    const { data: messages, error } = await getSessionMessages(sessionId, 100);
+    if (error || !messages) {
+      logger.warn("[Sessions] Failed to fetch session messages for pick:", error);
+      return null;
     }
+
+    return messages.map(mapNormalizedMessageToPickMessage);
   } catch (err) {
     logger.error("[Sessions] Error loading session messages for pick:", err);
     return null;
@@ -453,19 +396,21 @@ async function loadSessionPickMessages(
 async function loadParentMessage(
   sessionId: string,
   messageId: string,
-  directory: string,
+  _directory: string,
 ): Promise<SessionPickMessage | null> {
   try {
-    const { data, error } = await opencodeClient.session.message({
-      sessionID: sessionId,
-      messageID: messageId,
-      directory,
-    });
-    if (error || !data) {
+    const { data: messages, error } = await getSessionMessages(sessionId, 200);
+    if (error || !messages) {
       logger.warn("[Sessions] Failed to load the user message for the shown reply:", error);
       return null;
     }
-    return data as SessionPickMessage;
+
+    const parent = messages.find((message) => message.id === messageId);
+    if (!parent) {
+      return null;
+    }
+
+    return mapNormalizedMessageToPickMessage(parent);
   } catch (err) {
     logger.warn("[Sessions] Failed to load the user message for the shown reply:", err);
     return null;
@@ -519,45 +464,42 @@ async function sendSessionPickTranscript(
     return;
   }
 
-  const parts = renderAssistantFinalPartsSafe(reply.text);
-  for (const part of parts) {
-    await waitForSessionPickSend();
-    await sendRenderedBotPart({ api, chatId, part });
+  try {
+    const parts = renderAssistantFinalPartsSafe(reply.text);
+    for (const part of parts) {
+      await waitForSessionPickSend();
+      await sendRenderedBotPart({ api, chatId, part });
+    }
+  } catch (err) {
+    logger.error("[Sessions] Failed to send session preview message:", err);
   }
 }
 
 async function loadLatestAssistantResponse(
   sessionId: string,
-  directory: string,
+  _directory: string,
 ): Promise<string | null> {
   try {
-    const { data: messages, error } = await opencodeClient.session.messages({
-      sessionID: sessionId,
-      directory,
-      limit: LATEST_ASSISTANT_RESPONSE_MESSAGES_LIMIT,
-    });
+    const { data: messages, error } = await getSessionMessages(
+      sessionId,
+      LATEST_ASSISTANT_RESPONSE_MESSAGES_LIMIT,
+    );
 
     if (error || !messages) {
       logger.warn("[Sessions] Failed to fetch latest assistant response:", error);
       return null;
     }
 
-    const latestResponse = (messages as SessionMessageLike[]).reduce<{
+    const latestResponse = messages.reduce<{
       text: string;
       created: number;
     } | null>((latest, message) => {
-      if (message.info.role !== "assistant" || message.info.summary) {
+      if (message.role !== "assistant") {
         return latest;
       }
 
-      const text = extractTextParts(message.parts, { trim: false });
-      if (!text) {
-        return latest;
-      }
-
-      const created = message.info.time?.created ?? 0;
-      if (!latest || created >= latest.created) {
-        return { text, created };
+      if (!latest || message.created >= latest.created) {
+        return { text: message.text, created: message.created };
       }
 
       return latest;

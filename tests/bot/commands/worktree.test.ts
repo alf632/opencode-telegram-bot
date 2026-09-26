@@ -58,6 +58,17 @@ vi.mock("../../../src/utils/logger.js", () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+vi.mock("../../../src/runtime/container.js", () => ({
+  isContainerRuntime: vi.fn(() => {
+    const value = process.env.OPENCODE_TELEGRAM_CONTAINER;
+    if (value === undefined) {
+      return false;
+    }
+    const normalized = value.trim().toLowerCase();
+    return normalized !== "" && normalized !== "0" && normalized !== "false" && normalized !== "no";
+  }),
+}));
+
 import { worktreeCommand } from "../../../src/bot/commands/worktree-command.js";
 import { handleWorktreeCallback } from "../../../src/bot/callbacks/worktree-callback-handler.js";
 import { createTestAppContainer } from "../../helpers/app-container.js";

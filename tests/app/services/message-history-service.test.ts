@@ -2,38 +2,43 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const messages = vi.hoisted(() => vi.fn());
 vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: { session: { messages } },
+  opencodeV2: { session: { messages } },
 }));
 
 import { loadLatestAssistantMetrics } from "../../../src/app/services/message-history-service.js";
 
 const assistant = (created: number, input: number, summary = false) => ({
-  info: {
-    role: "assistant",
-    summary,
-    time: { created },
-    tokens: { input, output: 12, reasoning: 3, cache: { read: 8, write: 4 } },
-    cost: 0.123,
-  },
-  parts: [{ type: "text", text: "Private answer text" }],
+  type: "assistant" as const,
+  id: `msg-${created}`,
+  time: { created, completed: created + 1 },
+  content: [{ type: "text" as const, text: summary ? "Summary" : "Private answer text" }],
+  tokens: { input, output: 12, reasoning: 3, cache: { read: 8, write: 4 } },
+  cost: 0.123,
+});
+
+const user = (created: number) => ({
+  type: "user" as const,
+  id: `msg-${created}`,
+  time: { created },
+  text: "Hello",
 });
 
 describe("loadLatestAssistantMetrics", () => {
   beforeEach(() => messages.mockReset());
 
-  it("selects the latest non-summary assistant and returns only its metrics", async () => {
+  it("selects the latest assistant and returns only its metrics", async () => {
     messages.mockResolvedValue({
-      data: [assistant(20, 200, true), assistant(10, 100), assistant(5, 50)],
+      data: { data: [assistant(20, 200), assistant(10, 100), assistant(5, 50)] },
     });
 
     expect(await loadLatestAssistantMetrics("session", "directory")).toEqual({
-      input: 100, output: 12, reasoning: 3, cacheRead: 8, cacheWrite: 4, cost: 0.123,
+      input: 200, output: 12, reasoning: 3, cacheRead: 8, cacheWrite: 4, cost: 0.123,
     });
-    expect(messages).toHaveBeenCalledWith({ sessionID: "session", directory: "directory" });
+    expect(messages).toHaveBeenCalledWith({ sessionID: "session" });
   });
 
   it("returns no breakdown when there is no assistant message", async () => {
-    messages.mockResolvedValue({ data: [{ info: { role: "user" }, parts: [] }] });
+    messages.mockResolvedValue({ data: { data: [user(1)] } });
     expect(await loadLatestAssistantMetrics("session", "directory")).toBeNull();
   });
 

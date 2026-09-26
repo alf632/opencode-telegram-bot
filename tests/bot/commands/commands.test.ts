@@ -30,6 +30,8 @@ const mocked = vi.hoisted(() => ({
   commandListMock: vi.fn(),
   sessionStatusMock: vi.fn(),
   sessionCreateMock: vi.fn(),
+  sessionSwitchAgentMock: vi.fn(),
+  sessionSwitchModelMock: vi.fn(),
   sessionCommandMock: vi.fn(),
   setCurrentSessionMock: vi.fn(),
   clearSessionMock: vi.fn(),
@@ -65,16 +67,18 @@ vi.mock("../../../src/app/services/session-cache-service.js", () => ({
 }));
 
 vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
+  getBusySessionStatuses: mocked.sessionStatusMock,
+  opencodeV2: {
     command: {
       list: mocked.commandListMock,
     },
     session: {
-      status: mocked.sessionStatusMock,
       create: mocked.sessionCreateMock,
-      command: mocked.sessionCommandMock,
+      switchAgent: mocked.sessionSwitchAgentMock,
+      switchModel: mocked.sessionSwitchModelMock,
     },
   },
+  directApi: mocked.sessionCommandMock,
 }));
 
 vi.mock("../../../src/app/services/agent-selection-service.js", () => ({
@@ -210,6 +214,8 @@ describe("bot/commands/commands", () => {
     mocked.commandListMock.mockReset();
     mocked.sessionStatusMock.mockReset();
     mocked.sessionCreateMock.mockReset();
+    mocked.sessionSwitchAgentMock.mockReset();
+    mocked.sessionSwitchModelMock.mockReset();
     mocked.sessionCommandMock.mockReset();
     mocked.setCurrentSessionMock.mockReset();
     mocked.clearSessionMock.mockReset();
@@ -236,22 +242,24 @@ describe("bot/commands/commands", () => {
       },
       error: null,
     });
+    mocked.sessionSwitchAgentMock.mockResolvedValue({ data: null, error: null });
+    mocked.sessionSwitchModelMock.mockResolvedValue({ data: null, error: null });
     mocked.sessionCommandMock.mockResolvedValue({ data: {}, error: null });
   });
 
   it("shows commands list and starts custom interaction", async () => {
     mocked.commandListMock.mockResolvedValue({
-      data: [
+      data: { data: [
         { name: "init", description: "create/update AGENTS.md", source: "command" },
         { name: "poem", description: "write a poem", source: "command" },
-      ],
+      ]},
       error: null,
     });
 
     const ctx = createCommandContext(123);
     await commandsCommand(ctx as never, createDeps());
 
-    expect(mocked.commandListMock).toHaveBeenCalledWith({ directory: "D:/Projects/Repo" });
+    expect(mocked.commandListMock).toHaveBeenCalledWith({ location: { directory: "D:/Projects/Repo" } });
     expect(ctx.reply).toHaveBeenCalledTimes(1);
 
     const [, options] = defined((ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0]) as [
@@ -340,15 +348,11 @@ describe("bot/commands/commands", () => {
       }),
     );
     expect(mocked.suppressionRegisterMock).toHaveBeenCalledWith("session-1", "/poem");
-    expect(mocked.sessionCommandMock).toHaveBeenCalledWith({
-      sessionID: "session-1",
-      directory: "D:\\Projects\\Repo",
-      command: "poem",
-      arguments: "",
-      agent: "build",
-      model: "openai/gpt-5",
-      variant: "default",
-    });
+    expect(mocked.sessionCommandMock).toHaveBeenCalledWith(
+      "POST",
+      "/api/session/session-1/command",
+      { name: "poem" },
+    );
   });
 
   it("executes selected command with arguments from text message", async () => {
@@ -382,15 +386,11 @@ describe("bot/commands/commands", () => {
       "session-1",
       "/poem about spring",
     );
-    expect(mocked.sessionCommandMock).toHaveBeenCalledWith({
-      sessionID: "session-1",
-      directory: "D:\\Projects\\Repo",
-      command: "poem",
-      arguments: "about spring",
-      agent: "build",
-      model: "openai/gpt-5",
-      variant: "default",
-    });
+    expect(mocked.sessionCommandMock).toHaveBeenCalledWith(
+      "POST",
+      "/api/session/session-1/command",
+      { name: "poem", text: "about spring" },
+    );
   });
 
   it("notifies the user when session.command reports an error while attached", async () => {
@@ -586,14 +586,14 @@ describe("bot/commands/commands", () => {
     }));
 
     mocked.commandListMock.mockResolvedValueOnce({
-      data: commands,
+      data: { data: commands },
       error: null,
     });
 
     const ctx = createCommandContext(700);
     await commandsCommand(ctx as never, createDeps());
 
-    expect(mocked.commandListMock).toHaveBeenCalledWith({ directory: "D:/Projects/Repo" });
+    expect(mocked.commandListMock).toHaveBeenCalledWith({ location: { directory: "D:/Projects/Repo" } });
 
     const [, options] = defined((ctx.reply as ReturnType<typeof vi.fn>).mock.calls[0]) as [
       string,
@@ -610,14 +610,14 @@ describe("bot/commands/commands", () => {
     expect(options.reply_markup.inline_keyboard[11]?.[0]?.callback_data).toBe("commands:cancel");
   });
 
-  it("filters out non-command sources from command list", async () => {
+  it("returns commands from the catalog", async () => {
     mocked.commandListMock.mockResolvedValue({
-      data: [
-        { name: "init", description: "create/update AGENTS.md", source: "command" },
-        { name: "review", description: "review changes", source: "command" },
-        { name: "borsch", description: "Borsch recipe", source: "skill" },
-        { name: "from-mcp", description: "MCP prompt", source: "mcp" },
-      ],
+      data: { data: [
+        { name: "init", description: "create/update AGENTS.md" },
+        { name: "review", description: "review changes" },
+        { name: "borsch", description: "Borsch recipe" },
+        { name: "from-mcp", description: "MCP prompt" },
+      ]},
       error: null,
     });
 
@@ -633,7 +633,9 @@ describe("bot/commands/commands", () => {
 
     expect(options.reply_markup.inline_keyboard[0]?.[0]?.callback_data).toBe("commands:select:0");
     expect(options.reply_markup.inline_keyboard[1]?.[0]?.callback_data).toBe("commands:select:1");
-    expect(options.reply_markup.inline_keyboard[2]?.[0]?.callback_data).toBe("commands:cancel");
+    expect(options.reply_markup.inline_keyboard[2]?.[0]?.callback_data).toBe("commands:select:2");
+    expect(options.reply_markup.inline_keyboard[3]?.[0]?.callback_data).toBe("commands:select:3");
+    expect(options.reply_markup.inline_keyboard[4]?.[0]?.callback_data).toBe("commands:cancel");
 
     const state = container.interactionManager.getSnapshot();
     expect(state?.kind).toBe("custom");
@@ -642,6 +644,8 @@ describe("bot/commands/commands", () => {
     expect(state?.metadata.commands).toEqual([
       { name: "init", description: "create/update AGENTS.md" },
       { name: "review", description: "review changes" },
+      { name: "borsch", description: "Borsch recipe" },
+      { name: "from-mcp", description: "MCP prompt" },
     ]);
   });
 

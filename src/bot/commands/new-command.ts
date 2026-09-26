@@ -1,7 +1,7 @@
 import type { Bot } from "grammy";
 import type { AppContainer } from "../../app/bootstrap/app-container.js";
 import { CommandContext, Context } from "grammy";
-import { opencodeClient } from "../../opencode/client.js";
+import { opencodeV2 } from "../../opencode/client.js";
 import { setCurrentSession } from "../../app/services/session-service.js";
 import type { SessionInfo } from "../../app/types/session.js";
 import { ingestSessionInfoForCache } from "../../app/services/session-cache-service.js";
@@ -47,13 +47,15 @@ export async function newCommand(ctx: CommandContext<Context>, deps: NewCommandD
 
     logger.debug("[Bot] Creating new session for directory:", currentProject.worktree);
 
-    const { data: session, error } = await opencodeClient.session.create({
-      directory: currentProject.worktree,
+    const { data: sessionBody, error } = await opencodeV2.session.create({
+      location: { directory: currentProject.worktree },
     });
 
-    if (error || !session) {
+    if (error || !sessionBody) {
       throw error || new Error("No data received from server");
     }
+
+    const session = sessionBody.data;
 
     logger.info(
       `[Bot] Created new session via /new command: id=${session.id}, title="${session.title}", project=${currentProject.worktree}`,
@@ -66,7 +68,10 @@ export async function newCommand(ctx: CommandContext<Context>, deps: NewCommandD
     };
     setCurrentSession(sessionInfo);
     deps.resetInteractions("session_created");
-    await ingestSessionInfoForCache(session);
+    await ingestSessionInfoForCache({
+      directory: session.location.directory,
+      time: { updated: session.time.updated },
+    });
 
     await attachToSession({
       ...deps,

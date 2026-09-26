@@ -1,6 +1,6 @@
 import { Context } from "grammy";
 import type { AppContainer } from "../../app/bootstrap/app-container.js";
-import { opencodeClient } from "../../opencode/client.js";
+import { directApi } from "../../opencode/client.js";
 import { setCurrentSession } from "../../app/services/session-service.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
@@ -106,14 +106,15 @@ export async function handleRenameTextAnswer(
   logger.info(`[RenameHandler] Renaming session ${sessionInfo.sessionId} to: ${newTitle}`);
 
   try {
-    const { data: updatedSession, error } = await opencodeClient.session.update({
-      sessionID: sessionInfo.sessionId,
-      directory: sessionInfo.directory,
-      title: newTitle,
-    });
+    // v2 PATCH answers 204 with no payload; success = no error.
+    const { error } = await directApi<null>(
+      "PATCH",
+      `/api/session/${sessionInfo.sessionId}`,
+      { title: newTitle },
+    );
 
-    if (error || !updatedSession) {
-      throw error || new Error("Failed to update session");
+    if (error) {
+      throw error;
     }
 
     setCurrentSession({

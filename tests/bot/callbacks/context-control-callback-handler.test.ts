@@ -6,7 +6,7 @@ import { t } from "../../../src/i18n/index.js";
 const mocked = vi.hoisted(() => ({ session: vi.fn(), summarize: vi.fn(), model: vi.fn() }));
 vi.mock("../../../src/app/services/session-service.js", () => ({ getCurrentSession: mocked.session }));
 vi.mock("../../../src/app/services/model-selection-service.js", () => ({ getStoredModel: mocked.model }));
-vi.mock("../../../src/opencode/client.js", () => ({ opencodeClient: { session: { summarize: mocked.summarize } } }));
+vi.mock("../../../src/opencode/client.js", () => ({ opencodeV2: { session: { compact: mocked.summarize } } }));
 
 import { handleCompactConfirm, handleCompactDetails } from "../../../src/bot/callbacks/context-control-callback-handler.js";
 import { handleInlineMenuCancel } from "../../../src/bot/callbacks/inline-menu-cancel-callback-handler.js";

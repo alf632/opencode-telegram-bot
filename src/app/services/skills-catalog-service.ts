@@ -1,4 +1,4 @@
-import { opencodeClient } from "../../opencode/client.js";
+import { opencodeV2 } from "../../opencode/client.js";
 
 export interface SkillCatalogItem {
   name: string;
@@ -10,17 +10,17 @@ function normalizeDirectoryForCommandApi(directory: string): string {
 }
 
 export async function loadSkillsCatalog(projectDirectory: string): Promise<SkillCatalogItem[]> {
-  const { data, error } = await opencodeClient.command.list({
-    directory: normalizeDirectoryForCommandApi(projectDirectory),
+  const { data, error } = await opencodeV2.skill.list({
+    location: { directory: normalizeDirectoryForCommandApi(projectDirectory) },
   });
 
   if (error || !data) {
     throw error || new Error("No skill data received");
   }
 
-  return data
+  return data.data
     .filter((skill) => {
-      return typeof skill.name === "string" && skill.name.trim().length > 0 && skill.source === "skill";
+      return typeof skill.name === "string" && skill.name.trim().length > 0;
     })
     .map((skill) => ({
       name: skill.name,

@@ -36,11 +36,14 @@ const mocked = vi.hoisted(() => ({
 }));
 
 vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
+  getBusySessionStatuses: mocked.sessionStatusMock,
+  sendSessionPrompt: mocked.sessionPromptAsyncMock,
+  toV2FileAttachment: (part: { url: string; filename?: string }) => ({
+    uri: part.url,
+    ...(part.filename !== undefined ? { name: part.filename } : {}),
+  }),
+  opencodeV2: {
     session: {
-      status: mocked.sessionStatusMock,
-      prompt: mocked.sessionPromptMock,
-      promptAsync: mocked.sessionPromptAsyncMock,
       create: mocked.sessionCreateMock,
     },
   },
@@ -254,14 +257,14 @@ describe("bot/handlers/prompt", () => {
 
     expect(mocked.sessionPromptAsyncMock).toHaveBeenCalledWith({
       sessionID: "session-1",
-      directory: "D:\\Projects\\Repo",
-      parts: [{ type: "text", text: "Review README" }],
+      text: "Review README",
+      files: [],
       agent: "build",
       model: {
         providerID: "openai",
         modelID: "gpt-5",
+        variant: "default",
       },
-      variant: "default",
     });
     expect(mocked.sessionPromptMock).not.toHaveBeenCalled();
   });
@@ -427,10 +430,10 @@ describe("bot/handlers/prompt", () => {
 
     expect(mocked.sessionPromptAsyncMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        parts: [
-          { type: "text", text: "See attached files" },
-          expect.objectContaining({ type: "file", mime: "image/png" }),
-          expect.objectContaining({ type: "file", mime: "image/png" }),
+        text: "See attached files",
+        files: [
+          expect.objectContaining({ uri: expect.any(String) }),
+          expect.objectContaining({ uri: expect.any(String) }),
         ],
       }),
     );
@@ -456,7 +459,7 @@ describe("bot/handlers/prompt", () => {
     const deps: ProcessPromptDeps = {
       ...createDeps(),
       downloadFile,
-      getModelCapabilities: vi.fn().mockResolvedValue({ input: { image: true } }),
+      getModelCapabilities: vi.fn().mockResolvedValue({ input: ["image"] }),
     };
 
     const handled = await processIncomingPrompt(
@@ -475,13 +478,11 @@ describe("bot/handlers/prompt", () => {
     await backgroundTask.task();
     expect(mocked.sessionPromptAsyncMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        parts: [
-          { type: "text", text: "See attached file" },
+        text: "See attached file",
+        files: [
           expect.objectContaining({
-            type: "file",
-            mime: "image/jpeg",
-            filename: "rich.jpg",
-            url: expect.stringMatching(/^data:image\/jpeg;base64,/),
+            uri: expect.stringMatching(/^data:image\/jpeg;base64,/),
+            name: "rich.jpg",
           }),
         ],
       }),
@@ -494,7 +495,7 @@ describe("bot/handlers/prompt", () => {
     const deps: ProcessPromptDeps = {
       ...createDeps(),
       downloadFile,
-      getModelCapabilities: vi.fn().mockResolvedValue({ input: { image: false } }),
+      getModelCapabilities: vi.fn().mockResolvedValue({ input: ["text"] }),
     };
 
     const handled = await processIncomingPrompt(
@@ -513,7 +514,8 @@ describe("bot/handlers/prompt", () => {
     await backgroundTask.task();
     expect(mocked.sessionPromptAsyncMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        parts: [{ type: "text", text: "Use this caption" }],
+        text: "Use this caption",
+        files: [],
       }),
     );
   });
@@ -523,7 +525,7 @@ describe("bot/handlers/prompt", () => {
     const deps: ProcessPromptDeps = {
       ...createDeps(),
       downloadFile: vi.fn(),
-      getModelCapabilities: vi.fn().mockResolvedValue({ input: { image: false } }),
+      getModelCapabilities: vi.fn().mockResolvedValue({ input: ["text"] }),
     };
 
     const handled = await processIncomingPrompt(
@@ -544,7 +546,7 @@ describe("bot/handlers/prompt", () => {
     const deps: ProcessPromptDeps = {
       ...createDeps(),
       downloadFile: vi.fn().mockRejectedValue(new Error("download failed")),
-      getModelCapabilities: vi.fn().mockResolvedValue({ input: { image: true } }),
+      getModelCapabilities: vi.fn().mockResolvedValue({ input: ["image"] }),
     };
 
     const handled = await processIncomingPrompt(
@@ -583,7 +585,8 @@ describe("bot/handlers/prompt", () => {
       expect(mocked.resolvePendingAttachmentMock).toHaveBeenCalledWith("D:\\Projects\\Repo");
       expect(mocked.sessionPromptAsyncMock).toHaveBeenCalledWith(
         expect.objectContaining({
-          parts: [{ type: "text", text: "Explain this file" }, attachmentPart],
+          text: "Explain this file",
+          files: [{ uri: "file:///D:/Projects/Repo/src/index.ts", name: "src\\index.ts" }],
         }),
       );
     });
@@ -634,7 +637,7 @@ describe("bot/handlers/prompt", () => {
       await getScheduledBackgroundTask().task();
 
       expect(mocked.sessionPromptAsyncMock).toHaveBeenCalledWith(
-        expect.objectContaining({ parts: [{ type: "text", text: "Second" }] }),
+        expect.objectContaining({ text: "Second", files: [] }),
       );
     });
 
@@ -649,7 +652,7 @@ describe("bot/handlers/prompt", () => {
       expect(handled).toBe(true);
       expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining("⚠️"));
       expect(mocked.sessionPromptAsyncMock).toHaveBeenCalledWith(
-        expect.objectContaining({ parts: [{ type: "text", text: "Explain this file" }] }),
+        expect.objectContaining({ text: "Explain this file", files: [] }),
       );
       expect(promptAttachment.get()).toBeNull();
     });

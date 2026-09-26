@@ -1,7 +1,6 @@
-import type { Event } from "@opencode-ai/sdk/v2";
 import { config } from "../../config.js";
 import type { AppContainer } from "../bootstrap/app-container.js";
-import type { EventEnvelope } from "../../opencode/events.js";
+import type { BotEvent, EventEnvelope } from "../../opencode/events.js";
 import { safeBackgroundTask } from "../../utils/safe-background-task.js";
 import { markAttachedSessionBusy } from "./attach-service.js";
 import { reconcileBusyState } from "./busy-reconciliation-service.js";
@@ -25,7 +24,7 @@ export interface EventRouterOptions {
 }
 
 /** The session an event belongs to, read from the event itself. */
-function getEventSessionId(event: Event): string | null {
+function getEventSessionId(event: BotEvent): string | null {
   const properties = event.properties as {
     sessionID?: string;
     info?: { sessionID?: string };
@@ -35,7 +34,7 @@ function getEventSessionId(event: Event): string | null {
   return properties.sessionID || properties.info?.sessionID || properties.part?.sessionID || null;
 }
 
-function shouldMarkAttachedBusyFromEvent(event: Event): boolean {
+function shouldMarkAttachedBusyFromEvent(event: BotEvent): boolean {
   switch (event.type) {
     case "session.status":
       return (event.properties as { status?: { type?: string } }).status?.type === "busy";
@@ -78,7 +77,7 @@ export function createEventRouter({
     }
 
     if (event.type === "session.created" || event.type === "session.updated") {
-      const info = event.properties.info;
+      const info = event.properties.info as { directory?: string; time?: { updated?: number } } | undefined;
 
       if (info?.directory) {
         safeBackgroundTask({
@@ -90,9 +89,9 @@ export function createEventRouter({
 
     if (config.bot.trackBackgroundSessions) {
       const foregroundSessionId = sessionId && isForegroundSession(sessionId) ? sessionId : null;
-      deps.backgroundSessionTracker.processEvent(event, foregroundSessionId);
+      deps.backgroundSessionTracker.processEvent(event as never, foregroundSessionId);
     }
 
-    deps.summaryAggregator.processEvent(event);
+    deps.summaryAggregator.processEvent(event as never);
   };
 }

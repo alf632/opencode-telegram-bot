@@ -43,13 +43,12 @@ const mocked = vi.hoisted(() => ({
 }));
 
 vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeClient: {
+  listSessions: mocked.sessionListMock,
+  getBusySessionStatuses: mocked.sessionStatusMock,
+  getSessionMessages: mocked.sessionMessagesMock,
+  opencodeV2: {
     session: {
-      list: mocked.sessionListMock,
       get: mocked.sessionGetMock,
-      messages: mocked.sessionMessagesMock,
-      status: mocked.sessionStatusMock,
-      message: mocked.sessionMessageMock,
     },
   },
 }));
@@ -93,17 +92,6 @@ type SessionStub = {
   };
 };
 
-type SessionMessageStub = {
-  info: {
-    role: "user" | "assistant";
-    summary?: boolean;
-    time: {
-      created: number;
-    };
-  };
-  parts: Array<{ type: string; text?: string }>;
-};
-
 function createSession(index: number): SessionStub {
   return {
     id: `session-${index + 1}`,
@@ -117,19 +105,14 @@ function createSession(index: number): SessionStub {
 
 function createSessionMessage(
   role: "user" | "assistant",
-  text: string | null,
+  text: string,
   created: number,
-  summary = false,
-): SessionMessageStub {
+): { id: string; role: "user" | "assistant"; text: string; created: number } {
   return {
-    info: {
-      role,
-      summary,
-      time: {
-        created,
-      },
-    },
-    parts: text === null ? [] : [{ type: "text", text }],
+    id: `${role}-${created}`,
+    role,
+    text,
+    created,
   };
 }
 
@@ -384,7 +367,7 @@ describe("bot/commands/sessions", () => {
 
   it("resolves the project agent before sending the keyboard for an existing session", async () => {
     mocked.sessionGetMock.mockResolvedValueOnce({
-      data: createSession(0),
+      data: { data: createSession(0) },
       error: null,
     });
     mocked.resolveProjectAgentMock.mockResolvedValueOnce("plan");
@@ -429,47 +412,19 @@ describe("bot/commands/sessions", () => {
     );
   });
 
-  it("pages past a newer prompt and shows the finished reply it answers", async () => {
+  it("shows the latest finished reply when previewing a session", async () => {
     mocked.sessionGetMock.mockResolvedValueOnce({
-      data: createSession(0),
+      data: { data: createSession(0) },
       error: null,
     });
-    const firstPage = Array.from({ length: 20 }, (_, index) => ({
-      info: {
-        id: `page1-${index}`,
-        role: index === 19 ? ("user" as const) : ("assistant" as const),
-        time: { created: 2000 + index, completed: 2000 + index },
-      },
-      parts:
-        index === 19
-          ? [{ type: "text", text: "unanswered prompt" }]
-          : [{ type: "tool" }],
-    }));
+    const messages = [
+      createSessionMessage("assistant", "older tool", 100),
+      createSessionMessage("user", "answered prompt", 150),
+      createSessionMessage("assistant", "finished reply", 200),
+      createSessionMessage("user", "unanswered prompt", 250),
+    ];
     mocked.sessionMessagesMock.mockReset();
-    mocked.sessionMessagesMock
-      .mockResolvedValueOnce({ data: firstPage, error: null })
-      .mockResolvedValueOnce({
-        data: [
-          {
-            info: {
-              id: "user-old",
-              role: "user",
-              time: { created: 100 },
-            },
-            parts: [{ type: "text", text: "answered prompt" }],
-          },
-          {
-            info: {
-              id: "assistant-old",
-              role: "assistant",
-              parentID: "user-old",
-              time: { created: 150, completed: 180 },
-            },
-            parts: [{ type: "text", text: "finished reply" }],
-          },
-        ],
-        error: null,
-      });
+    mocked.sessionMessagesMock.mockResolvedValueOnce({ data: messages, error: null });
 
     startInteractionForTest(container.interactionManager, {
       kind: "inline",
@@ -483,17 +438,11 @@ describe("bot/commands/sessions", () => {
     const ctx = createCallbackContext("session:session-1", 456);
     await handleSessionSelect(ctx, createDeps());
 
-    expect(mocked.sessionMessagesMock).toHaveBeenNthCalledWith(2, {
-      sessionID: "session-1",
-      directory: "/repo",
-      limit: 20,
-      before: "page1-0",
-    });
     const sent = (ctx.api.sendMessage as ReturnType<typeof vi.fn>).mock.calls.map(
       (call) => String(call[1]),
     );
-    expect(sent.some((text) => text.includes("answered prompt"))).toBe(true);
     expect(sent.some((text) => text.includes("finished reply"))).toBe(true);
+    expect(sent.some((text) => text.includes("answered prompt"))).toBe(false);
     expect(sent.some((text) => text.includes("unanswered prompt"))).toBe(false);
     expect(sent.some((text) => text.includes("Recent messages:"))).toBe(false);
     expect(safeBackgroundTaskMock).not.toHaveBeenCalled();
@@ -501,30 +450,15 @@ describe("bot/commands/sessions", () => {
 
   it("does not show an in-flight reply when session status cannot be read", async () => {
     mocked.sessionGetMock.mockResolvedValueOnce({
-      data: createSession(0),
+      data: { data: createSession(0) },
       error: null,
     });
     mocked.sessionStatusMock.mockResolvedValueOnce({ error: { message: "down" } });
     mocked.sessionMessagesMock.mockReset();
     mocked.sessionMessagesMock.mockResolvedValueOnce({
       data: [
-        {
-          info: {
-            id: "user-1",
-            role: "user",
-            time: { created: 1 },
-          },
-          parts: [{ type: "text", text: "the prompt" }],
-        },
-        {
-          info: {
-            id: "assistant-1",
-            role: "assistant",
-            parentID: "user-1",
-            time: { created: 2 },
-          },
-          parts: [{ type: "text", text: "partial reply" }],
-        },
+        createSessionMessage("user", "the prompt", 1),
+        createSessionMessage("assistant", "partial reply", 2),
       ],
       error: null,
     });
@@ -548,23 +482,16 @@ describe("bot/commands/sessions", () => {
     expect(sent.some((text) => text.includes("the prompt"))).toBe(true);
   });
 
-  it("sends the empty notice when a later history page fails", async () => {
+  it("sends the latest user prompt as a quote when there is no assistant reply to preview", async () => {
     mocked.sessionGetMock.mockResolvedValueOnce({
-      data: createSession(0),
+      data: { data: createSession(0) },
       error: null,
     });
-    const firstPage = Array.from({ length: 20 }, (_, index) => ({
-      info: {
-        id: `page1-${index}`,
-        role: "user" as const,
-        time: { created: 2000 + index },
-      },
-      parts: [{ type: "text", text: "only a prompt" }],
-    }));
+    const messages = Array.from({ length: 5 }, (_, index) =>
+      createSessionMessage("user", "only a prompt", 2000 + index),
+    );
     mocked.sessionMessagesMock.mockReset();
-    mocked.sessionMessagesMock
-      .mockResolvedValueOnce({ data: firstPage, error: null })
-      .mockResolvedValueOnce({ error: { message: "page failed" } });
+    mocked.sessionMessagesMock.mockResolvedValueOnce({ data: messages, error: null });
 
     startInteractionForTest(container.interactionManager, {
       kind: "inline",
@@ -581,13 +508,13 @@ describe("bot/commands/sessions", () => {
     const sent = (ctx.api.sendMessage as ReturnType<typeof vi.fn>).mock.calls.map((call) =>
       String(call[1]),
     );
-    expect(sent).toContain(t("sessions.preview.empty"));
-    expect(sent.some((text) => text.includes("only a prompt"))).toBe(false);
+    expect(sent).not.toContain(t("sessions.preview.empty"));
+    expect(sent.some((text) => text.includes("only a prompt"))).toBe(true);
   });
 
   it("pulls the settings of the selected session before attaching to it", async () => {
     const session = createSession(0);
-    mocked.sessionGetMock.mockResolvedValueOnce({ data: session, error: null });
+    mocked.sessionGetMock.mockResolvedValueOnce({ data: { data: session }, error: null });
 
     startInteractionForTest(container.interactionManager, {
       kind: "inline",
@@ -607,7 +534,7 @@ describe("bot/commands/sessions", () => {
   });
 
   it("puts the pulled model on the keyboard sent with the selection message", async () => {
-    mocked.sessionGetMock.mockResolvedValueOnce({ data: createSession(0), error: null });
+    mocked.sessionGetMock.mockResolvedValueOnce({ data: { data: createSession(0) }, error: null });
 
     startInteractionForTest(container.interactionManager, {
       kind: "inline",
@@ -632,7 +559,7 @@ describe("bot/commands/sessions", () => {
 
   it("pulls the settings when a background session notification is opened", async () => {
     const session = createSession(0);
-    mocked.sessionGetMock.mockResolvedValueOnce({ data: session, error: null });
+    mocked.sessionGetMock.mockResolvedValueOnce({ data: { data: session }, error: null });
 
     const handled = await handleBackgroundSessionOpen(
       createCallbackContext("background-session:session-1", 456),
@@ -677,7 +604,7 @@ describe("bot/commands/sessions", () => {
 
   it("selects a background session without an active sessions menu", async () => {
     mocked.sessionGetMock.mockResolvedValueOnce({
-      data: createSession(0),
+      data: { data: createSession(0) },
       error: null,
     });
 
@@ -687,7 +614,6 @@ describe("bot/commands/sessions", () => {
     expect(handled).toBe(true);
     expect(mocked.sessionGetMock).toHaveBeenCalledWith({
       sessionID: "session-1",
-      directory: "/repo",
     });
     expect(mocked.setCurrentSessionMock).toHaveBeenCalledWith({
       id: "session-1",
@@ -720,7 +646,7 @@ describe("bot/commands/sessions", () => {
 
   it("sends the full latest assistant response after opening an assistant background notification", async () => {
     mocked.sessionGetMock.mockResolvedValueOnce({
-      data: createSession(0),
+      data: { data: createSession(0) },
       error: null,
     });
     const latestResponse = `Final assistant response. ${"More details. ".repeat(380)}`.trimEnd();
@@ -728,7 +654,6 @@ describe("bot/commands/sessions", () => {
       data: [
         createSessionMessage("assistant", "Old assistant response", 100),
         createSessionMessage("user", "User prompt should not be forwarded", 200),
-        createSessionMessage("assistant", "Summary should be ignored", 300, true),
         createSessionMessage("assistant", latestResponse, 400),
       ],
       error: null,
@@ -753,11 +678,7 @@ describe("bot/commands/sessions", () => {
     const previousSendCount = sendMessageMock.mock.calls.length;
     await taskOptions.task();
 
-    expect(mocked.sessionMessagesMock).toHaveBeenCalledWith({
-      sessionID: "session-1",
-      directory: "/repo",
-      limit: 20,
-    });
+    expect(mocked.sessionMessagesMock).toHaveBeenCalledWith("session-1", 20);
 
     const assistantResponseCalls = sendMessageMock.mock.calls.slice(previousSendCount);
     expect(assistantResponseCalls.length).toBeGreaterThan(1);
@@ -769,7 +690,7 @@ describe("bot/commands/sessions", () => {
 
   it("does not send preview or latest assistant response for background question notifications", async () => {
     mocked.sessionGetMock.mockResolvedValueOnce({
-      data: createSession(0),
+      data: { data: createSession(0) },
       error: null,
     });
 
@@ -783,7 +704,7 @@ describe("bot/commands/sessions", () => {
 
   it("keeps background session button usable when another inline menu is active", async () => {
     mocked.sessionGetMock.mockResolvedValueOnce({
-      data: createSession(0),
+      data: { data: createSession(0) },
       error: null,
     });
     startInteractionForTest(container.interactionManager, {
@@ -801,7 +722,6 @@ describe("bot/commands/sessions", () => {
     expect(handled).toBe(true);
     expect(mocked.sessionGetMock).toHaveBeenCalledWith({
       sessionID: "session-1",
-      directory: "/repo",
     });
     expect(mocked.setCurrentSessionMock).toHaveBeenCalledWith({
       id: "session-1",
@@ -813,7 +733,7 @@ describe("bot/commands/sessions", () => {
 
   it("keeps successful background selection when removing the button fails", async () => {
     mocked.sessionGetMock.mockResolvedValueOnce({
-      data: createSession(0),
+      data: { data: createSession(0) },
       error: null,
     });
 

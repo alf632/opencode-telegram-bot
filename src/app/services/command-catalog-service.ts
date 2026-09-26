@@ -1,4 +1,4 @@
-import { opencodeClient } from "../../opencode/client.js";
+import { opencodeV2 } from "../../opencode/client.js";
 
 export interface CommandCatalogItem {
   name: string;
@@ -10,21 +10,17 @@ function normalizeDirectoryForCommandApi(directory: string): string {
 }
 
 export async function loadCommandCatalog(projectDirectory: string): Promise<CommandCatalogItem[]> {
-  const { data, error } = await opencodeClient.command.list({
-    directory: normalizeDirectoryForCommandApi(projectDirectory),
+  const { data, error } = await opencodeV2.command.list({
+    location: { directory: normalizeDirectoryForCommandApi(projectDirectory) },
   });
 
   if (error || !data) {
     throw error || new Error("No command data received");
   }
 
-  return data
+  return data.data
     .filter((command) => {
-      return (
-        typeof command.name === "string" &&
-        command.name.trim().length > 0 &&
-        command.source === "command"
-      );
+      return typeof command.name === "string" && command.name.trim().length > 0;
     })
     .map((command) => ({
       name: command.name,

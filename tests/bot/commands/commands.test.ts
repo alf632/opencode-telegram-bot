@@ -351,7 +351,8 @@ describe("bot/commands/commands", () => {
     expect(mocked.sessionCommandMock).toHaveBeenCalledWith(
       "POST",
       "/api/session/session-1/command",
-      { name: "poem" },
+      // 2.0.16 requires `text`; a no-argument command sends it empty.
+      { name: "poem", text: "" },
     );
   });
 

@@ -335,7 +335,9 @@ export async function executeCommand(
       return directApi(
         "POST",
         `/api/session/${session.id}/command`,
-        args ? { name: params.commandName, text: args } : { name: params.commandName },
+        // 2.0.16 requires `text` as well as `name`; a command picked without
+        // arguments sends it empty rather than omitting the key.
+        { name: params.commandName, text: args ?? "" },
       );
     },
     onSuccess: ({ error }) => {

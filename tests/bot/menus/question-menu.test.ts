@@ -185,7 +185,74 @@ describe("bot/menus/question-menu", () => {
       flag: true,
       count: 42,
       retries: -3,
-      doc: "https://x.test/ticket",
+      // 2.0.16 accepts only `true` for an external field, never text.
+      doc: true,
+    });
+  });
+
+  it("acknowledges an external field the user left unanswered", async () => {
+    mocked.getSessionFormMock.mockResolvedValue({
+      data: { ...FORM, fields: [{ key: "doc", type: "external", title: "Doc", url: "https://x.test" }] },
+      error: null,
+    });
+    deps.questionManager.startQuestions([{ header: "Doc", question: "Doc", options: [] }], "frm_1");
+    const { ctx } = createContext();
+
+    await showNextQuestion(ctx, deps);
+
+    // Omitting an external field 400s the whole reply, so it is acknowledged
+    // whether or not the user typed anything.
+    expect(mocked.replyToSessionFormMock).toHaveBeenCalledWith("session-1", "frm_1", {
+      doc: true,
+    });
+  });
+
+  it("answers a multiselect with the option values the user picked, not the typed text", async () => {
+    mocked.getSessionFormMock.mockResolvedValue({
+      data: {
+        ...FORM,
+        fields: [
+          {
+            key: "targets",
+            type: "multiselect",
+            title: "Targets",
+            options: [
+              { value: "web", label: "Web", description: "" },
+              { value: "api", label: "API", description: "" },
+              { value: "docs", label: "Docs", description: "" },
+            ],
+          },
+        ],
+      },
+      error: null,
+    });
+    deps.questionManager.startQuestions(
+      [
+        {
+          header: "Targets",
+          question: "Targets",
+          options: [
+            { label: "Web", description: "" },
+            { label: "API", description: "" },
+            { label: "Docs", description: "" },
+          ],
+          multiple: true,
+        },
+      ],
+      "frm_1",
+    );
+    // Picked by position in the UI; a free-text answer is also offered.
+    deps.questionManager.selectOption(0, 0);
+    deps.questionManager.selectOption(0, 2);
+    deps.questionManager.setCustomAnswer(0, "my own");
+    const { ctx } = createContext();
+
+    await showNextQuestion(ctx, deps);
+
+    // A string is rejected: 2.0.16 wants a string[] of the field's own values,
+    // and `[typedAnswer]` would 400 as an invalid option.
+    expect(mocked.replyToSessionFormMock).toHaveBeenCalledWith("session-1", "frm_1", {
+      targets: ["web", "docs"],
     });
   });
 

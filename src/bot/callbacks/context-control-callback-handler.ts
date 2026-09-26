@@ -1,6 +1,6 @@
 import { Context } from "grammy";
 import { getStoredModel } from "../../app/services/model-selection-service.js";
-import { opencodeV2 } from "../../opencode/client.js";
+import { directApi } from "../../opencode/client.js";
 import { getCurrentSession } from "../../app/services/session-service.js";
 import { logger } from "../../utils/logger.js";
 import { t } from "../../i18n/index.js";
@@ -99,10 +99,15 @@ export async function handleCompactConfirm(
       `[ContextHandler] Calling summarize with sessionID=${session.id}, directory=${session.directory}, model=${storedModel.providerID}/${storedModel.modelID}`,
     );
 
-    // Call compact API (AI compaction runs with the session's current model)
-    const { error } = await opencodeV2.session.compact({
-      sessionID: session.id,
-    });
+    // Call compact API (AI compaction runs with the session's current model).
+    // 2.0.16 marks the requestBody required and the SDK sends none, which
+    // 400s with "Expected object", so the call goes through directApi with the
+    // empty body the schema allows ({id?, delivery?}).
+    const { error } = await directApi(
+      "POST",
+      `/api/session/${session.id}/compact`,
+      {},
+    );
 
     if (error) {
       logger.error("[ContextHandler] Compact failed:", error);

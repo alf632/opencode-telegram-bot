@@ -18,13 +18,7 @@ const mocked = vi.hoisted(() => ({
 }));
 
 vi.mock("../../../src/opencode/client.js", () => ({
-  opencodeV2: {
-    session: {
-      permission: {
-        reply: mocked.permissionReplyMock,
-      },
-    },
-  },
+  directApi: mocked.permissionReplyMock,
 }));
 
 vi.mock("../../../src/app/stores/settings-store.js", () => ({
@@ -132,7 +126,7 @@ describe("bot permission menu/callbacks", () => {
     container.interactionManager.clear("test_setup");
 
     mocked.permissionReplyMock.mockReset();
-    mocked.permissionReplyMock.mockResolvedValue({ error: null });
+    mocked.permissionReplyMock.mockResolvedValue({ data: null, error: null });
 
     mocked.currentProject = {
       id: "project-1",
@@ -311,11 +305,11 @@ describe("bot permission menu/callbacks", () => {
 
     await flushMicrotasks();
 
-    expect(mocked.permissionReplyMock).toHaveBeenCalledWith({
-      sessionID: "session-1",
-      requestID: "perm-valid",
-      reply: "always",
-    });
+    expect(mocked.permissionReplyMock).toHaveBeenCalledWith(
+      "POST",
+      "/api/session/session-1/permission/perm-valid/reply",
+      { decision: "always" },
+    );
 
     expect(container.permissionManager.isActive()).toBe(false);
     expect(container.interactionManager.getSnapshot()).toBeNull();
@@ -347,16 +341,18 @@ describe("bot permission menu/callbacks", () => {
     await flushMicrotasks();
 
     expect(mocked.permissionReplyMock).toHaveBeenCalledTimes(2);
-    expect(mocked.permissionReplyMock).toHaveBeenNthCalledWith(1, {
-      sessionID: "session-1",
-      requestID: "perm-1",
-      reply: "always",
-    });
-    expect(mocked.permissionReplyMock).toHaveBeenNthCalledWith(2, {
-      sessionID: "session-1",
-      requestID: "perm-duplicate",
-      reply: "always",
-    });
+    expect(mocked.permissionReplyMock).toHaveBeenNthCalledWith(
+      1,
+      "POST",
+      "/api/session/session-1/permission/perm-1/reply",
+      { decision: "always" },
+    );
+    expect(mocked.permissionReplyMock).toHaveBeenNthCalledWith(
+      2,
+      "POST",
+      "/api/session/session-1/permission/perm-duplicate/reply",
+      { decision: "always" },
+    );
     expect(container.permissionManager.isActive()).toBe(false);
     expect(container.interactionManager.getSnapshot()).toBeNull();
   });
@@ -438,13 +434,13 @@ describe("bot permission menu/callbacks", () => {
   it("ignores duplicate permission not-found errors after replying grouped requests", async () => {
     const botApi = createBotApi(660);
     mocked.permissionReplyMock
-      .mockResolvedValueOnce({ error: null })
+      .mockResolvedValueOnce({ data: null, error: null })
       .mockResolvedValueOnce({
-        error: {
-          _tag: "PermissionNotFoundError",
-          requestID: "perm-duplicate",
-          message: "Permission request not found: perm-duplicate",
-        },
+        data: null,
+        // directApi reports a non-2xx as `HTTP 404 for <METHOD> <path>`.
+        error: new Error(
+          "HTTP 404 for POST /api/session/session-1/permission/perm-duplicate/reply",
+        ),
       });
 
     await showPermissionRequest(botApi, 777, createPermissionRequest("perm-1"), createDeps());
@@ -485,11 +481,11 @@ describe("bot permission menu/callbacks", () => {
 
     await flushMicrotasks();
 
-    expect(mocked.permissionReplyMock).toHaveBeenCalledWith({
-      sessionID: "session-1",
-      requestID: "perm-1",
-      reply: "once",
-    });
+    expect(mocked.permissionReplyMock).toHaveBeenCalledWith(
+      "POST",
+      "/api/session/session-1/permission/perm-1/reply",
+      { decision: "once" },
+    );
 
     expect(container.permissionManager.isActive()).toBe(true);
     expect(container.permissionManager.getPendingCount()).toBe(1);
@@ -510,11 +506,11 @@ describe("bot permission menu/callbacks", () => {
 
     await flushMicrotasks();
 
-    expect(mocked.permissionReplyMock).toHaveBeenCalledWith({
-      sessionID: "session-1",
-      requestID: "perm-2",
-      reply: "reject",
-    });
+    expect(mocked.permissionReplyMock).toHaveBeenCalledWith(
+      "POST",
+      "/api/session/session-1/permission/perm-2/reply",
+      { decision: "reject" },
+    );
 
     expect(container.permissionManager.isActive()).toBe(false);
     expect(container.interactionManager.getSnapshot()).toBeNull();
@@ -524,10 +520,8 @@ describe("bot permission menu/callbacks", () => {
     const botApi = createBotApi(750);
     await showPermissionRequest(botApi, 777, createPermissionRequest("perm-stale"), createDeps());
     mocked.permissionReplyMock.mockResolvedValueOnce({
-      error: {
-        name: "NotFoundError",
-        data: { message: "Permission request not found" },
-      },
+      data: null,
+      error: new Error("HTTP 404 for POST /api/session/session-1/permission/perm-stale/reply"),
     });
 
     const ctx = createPermissionCallbackContext("permission:always", 750);
@@ -543,7 +537,8 @@ describe("bot permission menu/callbacks", () => {
     const botApi = createBotApi(751);
     await showPermissionRequest(botApi, 777, createPermissionRequest("perm-error"), createDeps());
     mocked.permissionReplyMock.mockResolvedValueOnce({
-      error: { name: "ServerError", data: { message: "Permission service unavailable" } },
+      data: null,
+      error: new Error("HTTP 500 for POST /api/session/session-1/permission/perm-error/reply"),
     });
 
     const ctx = createPermissionCallbackContext("permission:once", 751);

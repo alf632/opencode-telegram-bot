@@ -1,7 +1,7 @@
 import type { Context } from "grammy";
 import type { AppContainer } from "../../app/bootstrap/app-container.js";
 import type { PermissionReply } from "../../app/types/permission.js";
-import { opencodeV2 } from "../../opencode/client.js";
+import { directApi } from "../../opencode/client.js";
 import { getCurrentProject } from "../../app/stores/settings-store.js";
 import { getCurrentSession } from "../../app/services/session-service.js";
 import { clearPermissionInteraction, syncPermissionInteractionState } from "../menus/permission-menu.js";
@@ -40,6 +40,14 @@ function isPermissionRequestNotFound(error: unknown): boolean {
   }
 
   if (candidate.name === "NotFoundError") {
+    return true;
+  }
+
+  // directApi reports a non-2xx as `HTTP 404 for <METHOD> <path>`, so the
+  // structured tags above never arrive. The only route this handler posts to
+  // is the permission reply, so a 404 there means the request was already
+  // resolved.
+  if (typeof candidate.message === "string" && /\bHTTP 404\b/.test(candidate.message)) {
     return true;
   }
 
@@ -150,38 +158,37 @@ async function handlePermissionReply(
   safeBackgroundTask({
     taskName: "permission.reply",
     task: async () => {
-      let firstError: unknown = null;
-      let lastResponse: Awaited<ReturnType<typeof opencodeV2.session.permission.reply>> | null =
-        null;
+      let firstError: Error | null = null;
 
       const sessionID = currentSession?.id;
       if (!sessionID) {
         firstError = new Error("No active session for permission reply");
       } else {
         for (const requestID of requestIDs) {
-          const response = await opencodeV2.session.permission.reply({
-            sessionID,
-            requestID,
-            reply,
-          });
-          lastResponse = response;
+          // 2.0.16 names the body key `decision`, not `reply`; the SDK is still
+          // generated against the older v2 and sends `reply`, which 400s.
+          const { error } = await directApi(
+            "POST",
+            `/api/session/${sessionID}/permission/${requestID}/reply`,
+            { decision: reply },
+          );
 
-          if (!response.error) {
+          if (!error) {
             continue;
           }
 
-          if (requestIDs.length > 1 && isPermissionRequestNotFound(response.error)) {
+          if (requestIDs.length > 1 && isPermissionRequestNotFound(error)) {
             logger.debug(
               `[PermissionHandler] Ignoring duplicate permission reply miss: requestID=${requestID}`,
             );
             continue;
           }
 
-          firstError ??= response.error;
+          firstError ??= error;
         }
       }
 
-      return { ...lastResponse, error: firstError };
+      return { error: firstError };
     },
     onSuccess: ({ error }) => {
       if (error) {

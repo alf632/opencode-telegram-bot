@@ -221,11 +221,14 @@ async function showPollSummary(
 }
 
 // v2 validates an answer against the field it belongs to and rejects a
-// mismatch with FormInvalidAnswerError, so a typed answer is coerced to the
-// declared type: yes/true to a boolean, a finite number to number/integer,
-// and the raw text for string/external. Selected options are already the
-// server's own values. Unanswered fields, and a number the user did not type,
-// are simply omitted.
+// mismatch with FormInvalidAnswerError — and it rejects the *whole* reply, so
+// one wrong value loses every answer the user just gave. The rules, per field
+// type: an external field is acknowledged with `true` and nothing else, a
+// multiselect is a string[] of the field's own option values (the typed text
+// cannot stand in for it), a typed answer becomes yes/true for a boolean and a
+// finite number for number/integer, and a string is sent as typed. Selected
+// options are already the server's own values. Unanswered fields, and a number
+// the user did not type, are simply omitted.
 const BOOLEAN_TRUE_ANSWER = /^(yes|true)$/i;
 
 function coerceFormAnswer(
@@ -233,6 +236,19 @@ function coerceFormAnswer(
   typedAnswer: string | undefined,
   selectedValues: string[],
 ): SessionFormValue | undefined {
+  // The only value 2.0.16 accepts for an external field, and omitting the key
+  // is rejected like any other mismatch.
+  if (field.type === "external") {
+    return true;
+  }
+
+  // A multiselect must stay a string[] of option values: a bare string is
+  // rejected, and so is an array holding text the user typed, because the
+  // items are validated against the options.
+  if (field.type === "multiselect") {
+    return selectedValues.length > 0 ? selectedValues : undefined;
+  }
+
   if (typedAnswer !== undefined) {
     if (field.type === "boolean") {
       return BOOLEAN_TRUE_ANSWER.test(typedAnswer);
@@ -244,9 +260,6 @@ function coerceFormAnswer(
     return typedAnswer;
   }
 
-  if (field.type === "multiselect") {
-    return selectedValues.length > 0 ? selectedValues : undefined;
-  }
   return selectedValues[0];
 }
 

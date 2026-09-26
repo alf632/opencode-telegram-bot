@@ -3,10 +3,10 @@ import type { Context } from "grammy";
 import { createTestAppContainer } from "../../helpers/app-container.js";
 import { t } from "../../../src/i18n/index.js";
 
-const mocked = vi.hoisted(() => ({ session: vi.fn(), summarize: vi.fn(), model: vi.fn() }));
+const mocked = vi.hoisted(() => ({ session: vi.fn(), compact: vi.fn(), model: vi.fn() }));
 vi.mock("../../../src/app/services/session-service.js", () => ({ getCurrentSession: mocked.session }));
 vi.mock("../../../src/app/services/model-selection-service.js", () => ({ getStoredModel: mocked.model }));
-vi.mock("../../../src/opencode/client.js", () => ({ opencodeV2: { session: { compact: mocked.summarize } } }));
+vi.mock("../../../src/opencode/client.js", () => ({ directApi: mocked.compact }));
 
 import { handleCompactConfirm, handleCompactDetails } from "../../../src/bot/callbacks/context-control-callback-handler.js";
 import { handleInlineMenuCancel } from "../../../src/bot/callbacks/inline-menu-cancel-callback-handler.js";
@@ -28,7 +28,7 @@ describe("context compaction flow", () => {
     vi.clearAllMocks();
     mocked.session.mockReturnValue({ id: "session", directory: "/project", title: "Task" });
     mocked.model.mockReturnValue({ providerID: "provider", modelID: "model" });
-    mocked.summarize.mockResolvedValue({});
+    mocked.compact.mockResolvedValue({ data: null, error: null });
   });
 
   it("edits details into confirmation and compacts only after confirming", async () => {
@@ -36,7 +36,7 @@ describe("context compaction flow", () => {
     deps.interactionManager.start({ kind: "inline", expectedInput: "callback", metadata: { menuKind: "context", messageId: 7, stage: "details" } });
     const early = callback("compact:confirm");
     await handleCompactConfirm(early, deps);
-    expect(mocked.summarize).not.toHaveBeenCalled();
+    expect(mocked.compact).not.toHaveBeenCalled();
 
     const details = callback("compact:details");
     await handleCompactDetails(details, deps);
@@ -47,11 +47,13 @@ describe("context compaction flow", () => {
       t("context.button.confirm"), t("inline.button.cancel"),
     ]);
     expect(deps.interactionManager.getSnapshot()?.metadata.stage).toBe("confirm");
-    expect(mocked.summarize).not.toHaveBeenCalled();
+    expect(mocked.compact).not.toHaveBeenCalled();
 
     const confirm = callback("compact:confirm");
     await handleCompactConfirm(confirm, deps);
-    expect(mocked.summarize).toHaveBeenCalledOnce();
+    expect(mocked.compact).toHaveBeenCalledOnce();
+    // 2.0.16 marks the compact requestBody required; omitting it 400s.
+    expect(mocked.compact).toHaveBeenCalledWith("POST", "/api/session/session/compact", {});
     expect(deps.interactionManager.getSnapshot()).toBeNull();
     expect(confirm.deleteMessage).toHaveBeenCalledOnce();
     expect(confirm.reply).toHaveBeenCalledWith(t("context.progress"));
@@ -67,7 +69,7 @@ describe("context compaction flow", () => {
       expect(ctx.deleteMessage).toHaveBeenCalledOnce();
       expect(deps.interactionManager.getSnapshot()).toBeNull();
     }
-    expect(mocked.summarize).not.toHaveBeenCalled();
+    expect(mocked.compact).not.toHaveBeenCalled();
   });
 
   it("rejects callbacks from a different message and repeated details action", async () => {
@@ -81,7 +83,7 @@ describe("context compaction flow", () => {
     const repeated = callback("compact:details");
     await handleCompactDetails(repeated, deps);
     expect(repeated.editMessageText).not.toHaveBeenCalled();
-    expect(mocked.summarize).not.toHaveBeenCalled();
+    expect(mocked.compact).not.toHaveBeenCalled();
   });
 
   it("answers the callback before waiting for Telegram to edit the confirmation", async () => {

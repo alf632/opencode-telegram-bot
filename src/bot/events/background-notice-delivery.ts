@@ -4,7 +4,7 @@ import { logger } from "../../utils/logger.js";
 import { buildBackgroundSessionOpenKeyboard } from "../menus/session-selection-menu.js";
 import type { SessionTargetPolicy, TelegramEventDelivery } from "./telegram-event-delivery.js";
 
-function formatShortSessionId(sessionId: string): string {
+export function formatShortSessionId(sessionId: string): string {
   return sessionId.length <= 8 ? sessionId : sessionId.slice(0, 8);
 }
 

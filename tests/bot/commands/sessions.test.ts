@@ -879,6 +879,40 @@ describe("bot/commands/sessions", () => {
     });
   });
 
+  it("answers the background session button with an already connected toast for the attached session", async () => {
+    container.attachManager.attach("session-1", "/repo");
+
+    const ctx = createCallbackContext("background-session:p:session-1", 456);
+    const handled = await handleBackgroundSessionOpen(ctx, createDeps());
+
+    expect(handled).toBe(true);
+    // "session-1" is 9 characters, so the title arrives shortened to 8.
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({
+      text: t("attach.already_connected", { title: "session-" }),
+    });
+    expect(mocked.sessionGetMock).not.toHaveBeenCalled();
+    expect(mocked.setCurrentSessionMock).not.toHaveBeenCalled();
+    expect(ctx.editMessageReplyMarkup).not.toHaveBeenCalled();
+    expect(ctx.reply).not.toHaveBeenCalled();
+    expect(ctx.api.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("answers the attached background session with the already connected toast even while it is busy", async () => {
+    container.attachManager.attach("session-1", "/repo");
+    container.attachManager.markBusy("session-1");
+
+    const ctx = createCallbackContext("background-session:p:session-1", 456);
+    const handled = await handleBackgroundSessionOpen(ctx, createDeps());
+
+    expect(handled).toBe(true);
+    expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({
+      text: t("attach.already_connected", { title: "session-" }),
+    });
+    expect(ctx.answerCallbackQuery).not.toHaveBeenCalledWith({ text: t("bot.session_busy") });
+    expect(mocked.sessionGetMock).not.toHaveBeenCalled();
+    expect(ctx.api.sendMessage).not.toHaveBeenCalled();
+  });
+
   it("blocks background session open during non-inline interactions", async () => {
     startInteractionForTest(container.interactionManager, {
       kind: "question",

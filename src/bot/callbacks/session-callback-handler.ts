@@ -14,6 +14,7 @@ import type { SessionInfo } from "../../app/types/session.js";
 import { getCurrentProject } from "../../app/stores/settings-store.js";
 import { appendInlineMenuCancelButton, ensureActiveInlineMenu } from "../menus/inline-menu.js";
 import { isForegroundBusy } from "../../app/services/run-control-service.js";
+import { formatShortSessionId } from "../events/background-notice-delivery.js";
 import { replyBusyBlocked } from "../messages/busy-blocked-renderer.js";
 import { logger } from "../../utils/logger.js";
 import { safeBackgroundTask } from "../../utils/safe-background-task.js";
@@ -233,6 +234,19 @@ export async function handleBackgroundSessionOpen(
   const payload = parseBackgroundSessionCallback(data);
   if (!payload) {
     return false;
+  }
+
+  // Above the busy gate: a pending permission means the followed session is
+  // busy, so the busy text would be the wrong answer for this press.
+  if (deps.attachManager.isAttachedSession(payload.sessionId)) {
+    await ctx
+      .answerCallbackQuery({
+        text: t("attach.already_connected", {
+          title: formatShortSessionId(payload.sessionId),
+        }),
+      })
+      .catch(() => {});
+    return true;
   }
 
   if (isForegroundBusy(deps)) {

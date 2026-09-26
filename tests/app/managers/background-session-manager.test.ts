@@ -210,6 +210,204 @@ describe("BackgroundSessionTracker", () => {
     expect(onNotification).toHaveBeenCalledTimes(2);
   });
 
+  it("coalesces repeated permission requests of one session into a single notice", async () => {
+    const tracker = new BackgroundSessionTracker();
+    const onNotification = vi.fn();
+    tracker.setOnNotification(onNotification);
+
+    tracker.processEvent(
+      event({
+        type: "permission.asked",
+        properties: { id: "permission-1", sessionID: "session-2", permission: "bash" },
+      }),
+      "session-1",
+    );
+    tracker.processEvent(
+      event({
+        type: "permission.asked",
+        properties: { id: "permission-2", sessionID: "session-2", permission: "edit" },
+      }),
+      "session-1",
+    );
+
+    await flushNotifications();
+
+    expect(onNotification).toHaveBeenCalledTimes(1);
+    expect(onNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "permission_asked", requestId: "permission-1" }),
+    );
+  });
+
+  it("notifies again when a permission request is asked after a reply", async () => {
+    const tracker = new BackgroundSessionTracker();
+    const onNotification = vi.fn();
+    tracker.setOnNotification(onNotification);
+
+    tracker.processEvent(
+      event({
+        type: "permission.asked",
+        properties: { id: "permission-1", sessionID: "session-2", permission: "bash" },
+      }),
+      "session-1",
+    );
+    tracker.processEvent(
+      event({
+        type: "permission.asked",
+        properties: { id: "permission-2", sessionID: "session-2", permission: "edit" },
+      }),
+      "session-1",
+    );
+    tracker.processEvent(
+      event({
+        type: "permission.replied",
+        properties: { sessionID: "session-2", requestID: "permission-1", reply: "once" },
+      }),
+      "session-1",
+    );
+    tracker.processEvent(
+      event({
+        type: "permission.asked",
+        properties: { id: "permission-3", sessionID: "session-2", permission: "webfetch" },
+      }),
+      "session-1",
+    );
+
+    await flushNotifications();
+
+    expect(onNotification).toHaveBeenCalledTimes(2);
+    expect(onNotification).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "permission_asked", requestId: "permission-3" }),
+    );
+  });
+
+  it("coalesces repeated question requests of one session and re-arms on a reply", async () => {
+    const tracker = new BackgroundSessionTracker();
+    const onNotification = vi.fn();
+    tracker.setOnNotification(onNotification);
+
+    tracker.processEvent(
+      event({
+        type: "question.asked",
+        properties: { id: "question-1", sessionID: "session-2", questions: [] },
+      }),
+      "session-1",
+    );
+    tracker.processEvent(
+      event({
+        type: "question.asked",
+        properties: { id: "question-2", sessionID: "session-2", questions: [] },
+      }),
+      "session-1",
+    );
+
+    await flushNotifications();
+
+    expect(onNotification).toHaveBeenCalledTimes(1);
+
+    tracker.processEvent(
+      event({
+        type: "question.replied",
+        properties: { sessionID: "session-2", requestID: "question-1", answers: [] },
+      }),
+      "session-1",
+    );
+    tracker.processEvent(
+      event({
+        type: "question.asked",
+        properties: { id: "question-3", sessionID: "session-2", questions: [] },
+      }),
+      "session-1",
+    );
+
+    await flushNotifications();
+
+    expect(onNotification).toHaveBeenCalledTimes(2);
+    expect(onNotification).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "question_asked", requestId: "question-3" }),
+    );
+  });
+
+  it("re-arms the coalesced question notice when the question is rejected", async () => {
+    const tracker = new BackgroundSessionTracker();
+    const onNotification = vi.fn();
+    tracker.setOnNotification(onNotification);
+
+    tracker.processEvent(
+      event({
+        type: "question.asked",
+        properties: { id: "question-1", sessionID: "session-2", questions: [] },
+      }),
+      "session-1",
+    );
+    tracker.processEvent(
+      event({
+        type: "question.asked",
+        properties: { id: "question-2", sessionID: "session-2", questions: [] },
+      }),
+      "session-1",
+    );
+    tracker.processEvent(
+      event({
+        type: "question.rejected",
+        properties: { sessionID: "session-2", requestID: "question-1" },
+      }),
+      "session-1",
+    );
+    tracker.processEvent(
+      event({
+        type: "question.asked",
+        properties: { id: "question-3", sessionID: "session-2", questions: [] },
+      }),
+      "session-1",
+    );
+
+    await flushNotifications();
+
+    expect(onNotification).toHaveBeenCalledTimes(2);
+    expect(onNotification).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "question_asked", requestId: "question-3" }),
+    );
+  });
+
+  it("treats question and permission notices of one session as independent", async () => {
+    const tracker = new BackgroundSessionTracker();
+    const onNotification = vi.fn();
+    tracker.setOnNotification(onNotification);
+
+    tracker.processEvent(
+      event({
+        type: "question.asked",
+        properties: { id: "question-1", sessionID: "session-2", questions: [] },
+      }),
+      "session-1",
+    );
+    tracker.processEvent(
+      event({
+        type: "permission.asked",
+        properties: { id: "permission-1", sessionID: "session-2", permission: "bash" },
+      }),
+      "session-1",
+    );
+    tracker.processEvent(
+      event({
+        type: "question.asked",
+        properties: { id: "question-2", sessionID: "session-2", questions: [] },
+      }),
+      "session-1",
+    );
+    tracker.processEvent(
+      event({
+        type: "permission.asked",
+        properties: { id: "permission-2", sessionID: "session-2", permission: "edit" },
+      }),
+      "session-1",
+    );
+
+    await flushNotifications();
+
+    expect(onNotification).toHaveBeenCalledTimes(2);
+  });
+
   it("ignores child sessions to avoid duplicate subagent notifications", async () => {
     const tracker = new BackgroundSessionTracker();
     const onNotification = vi.fn();

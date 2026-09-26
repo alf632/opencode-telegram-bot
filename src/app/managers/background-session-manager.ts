@@ -30,6 +30,7 @@ class BackgroundSessionTracker {
   private pendingAssistantResponsesBySessionId = new Map<string, PendingAssistantResponse>();
   private questionRequestIds = new Set<string>();
   private permissionRequestIds = new Set<string>();
+  private outstandingKindsBySessionId = new Map<string, Set<BackgroundSessionNotificationKind>>();
 
   setDirectory(directory: string): void {
     if (this.directory === directory) {
@@ -52,6 +53,7 @@ class BackgroundSessionTracker {
     this.pendingAssistantResponsesBySessionId.clear();
     this.questionRequestIds.clear();
     this.permissionRequestIds.clear();
+    this.outstandingKindsBySessionId.clear();
   }
 
   processEvent(event: Event, currentSessionId: string | null): void {
@@ -71,6 +73,13 @@ class BackgroundSessionTracker {
         break;
       case "permission.asked":
         this.handleRequestEvent("permission_asked", event.properties, currentSessionId);
+        break;
+      case "permission.replied":
+        this.rearmRequestKind("permission_asked", event.properties.sessionID);
+        break;
+      case "question.replied":
+      case "question.rejected":
+        this.rearmRequestKind("question_asked", event.properties.sessionID);
         break;
       default:
         break;
@@ -160,12 +169,46 @@ class BackgroundSessionTracker {
     }
 
     deliveredRequestIds.add(id);
+
+    const outstandingKinds = this.outstandingKindsBySessionId.get(sessionId) ?? new Set();
+    if (outstandingKinds.has(kind)) {
+      logger.debug(
+        `[BackgroundSessionTracker] Skipping notice, one of this kind is already outstanding: session=${sessionId}, kind=${kind}, request=${id}`,
+      );
+      return;
+    }
+
+    outstandingKinds.add(kind);
+    this.outstandingKindsBySessionId.set(sessionId, outstandingKinds);
+
     this.emitNotification({
       kind,
       sessionId,
       sessionTitle: this.sessionTitles.get(sessionId),
       requestId: id,
     });
+  }
+
+  private rearmRequestKind(
+    kind: Extract<BackgroundSessionNotificationKind, "question_asked" | "permission_asked">,
+    sessionId: string | undefined,
+  ): void {
+    if (!sessionId) {
+      return;
+    }
+
+    const outstandingKinds = this.outstandingKindsBySessionId.get(sessionId);
+    if (!outstandingKinds?.delete(kind)) {
+      return;
+    }
+
+    if (outstandingKinds.size === 0) {
+      this.outstandingKindsBySessionId.delete(sessionId);
+    }
+
+    logger.debug(
+      `[BackgroundSessionTracker] Request resolved, re-arming notices: session=${sessionId}, kind=${kind}`,
+    );
   }
 
   private shouldIgnoreSession(sessionId: string, currentSessionId: string | null): boolean {
